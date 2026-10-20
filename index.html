@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <title>Крыша без переделок</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <button class="project-chip" id="projectChip" type="button">
+      <span class="chip-label">Проект</span>
+      <span class="chip-name" id="projectName">—</span>
+    </button>
+    <span class="badge" id="accessBadge">бесплатно</span>
+  </header>
+
+  <main id="view"></main>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="project" type="button"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7M5 10v10h14V10"/></svg>Проект</button>
+    <button data-tab="rafter" type="button"><svg viewBox="0 0 24 24"><path d="M2 20 12 5l10 15M7 13h10"/></svg>Стропила</button>
+    <button data-tab="section" type="button"><svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="18"/><path d="M8 8h8M8 16h8"/></svg>Сечения</button>
+    <button data-tab="check" type="button"><svg viewBox="0 0 24 24"><path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10"/></svg>Чек-листы</button>
+    <button data-tab="more" type="button"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>Ещё</button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="config.js"></script>
+  <script src="core.js"></script>
+  <script src="checklists.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
