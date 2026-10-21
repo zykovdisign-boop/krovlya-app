@@ -28,10 +28,23 @@
   };
 
   const DEFAULT = {
-    name: "Мой дом", width: 8000, length: 10000, form: "gable", roof: "light", box: "gas", attic: "mansard",
-    angle: 35, over: 500, step: 600, h: 200, b: 50, d: "", plate: 150, snow: 180, spanR: "", beamSpan: "",
+    name: "Мой дом", width: 8000, length: 10000, height: 2800, over: 500, form: "gable", material: "metal", box: "gas",
+    step: 600, h: 200, b: 50, d: "", plate: 150, snow: 180, ridge: "butt", beamW: 150, dr: "",
   };
-  const S = { projects: [], cur: null, prog: {}, paid: false, tab: "rafter", openList: null };
+  // материалы из книги (глава 2): вес с пирогом для расчёта, минимальный уклон
+  const MATERIALS = [
+    { k: "cpc", t: "Цементно-песчаная черепица", w: 45, min: 22, heavy: true },
+    { k: "ceramic", t: "Керамическая черепица", w: 50, min: 22, heavy: true },
+    { k: "metal", t: "Металлочерепица", w: 5, min: 14 },
+    { k: "prof", t: "Профнастил", w: 5, min: 8 },
+    { k: "soft", t: "Мягкая кровля", w: 18, min: 12 },
+    { k: "falz", t: "Фальцевая кровля", w: 6, min: 12 },
+  ];
+  const rad = (d) => (d * Math.PI) / 180;
+  const materialOf = (p) => MATERIALS.find((m) => m.k === p.material) || MATERIALS[2];
+  const heightOf = (p) => num(p.height, (num(p.width, 8000) / 2) * Math.tan(rad(num(p.angle, 35))));
+  const angleOf = (p) => (Math.atan(heightOf(p) / (num(p.width, 8000) / 2)) * 180) / Math.PI;
+  const S = { projects: [], cur: null, prog: {}, paid: false, tab: "project", openList: null };
   const P = () => S.projects.find((p) => p.id === S.cur) || S.projects[0];
   let saveTimer;
   function save() {
@@ -102,40 +115,204 @@
   /* ---------- вкладка: проект ---------- */
   function viewProject() {
     const v = $("#view");
-    v.innerHTML = `<h2>Проект</h2>
-      <div class="card"><div class="grid">
-        ${field("name", "Название", { full: true, text: true })}
-        ${field("width", "Ширина дома, мм (поперёк конька)")}
-        ${field("length", "Длина дома, мм (вдоль конька)")}
-        ${field("form", "Форма крыши", { options: [["gable", "Двускатная"], ["hip", "Вальмовая"]] })}
-        ${field("roof", "Кровля", { options: [["light", "Лёгкая: металл, мягкая, фальц"], ["heavy", "Тяжёлая: ЦПЧ, керамика"]] })}
-        ${field("box", "Коробка", { options: [["gas", "Газобетон / пеноблок"], ["brick", "Кирпич"], ["timber", "Брус / бревно"], ["frame", "Каркас"]] })}
-        ${field("attic", "Под крышей", { options: [["mansard", "Мансарда"], ["cold", "Холодный чердак"]] })}
-      </div></div>
-      <div class="card" id="advice"></div>`;
-    bindFields(v, advice);
-    advice();
-  }
-  function advice() {
     const p = P();
+    v.innerHTML = `<h2>Проект</h2>
+      <div class="card"><h3>Основание</h3><div class="grid">
+        ${field("name", "Название", { full: true, text: true })}
+        ${field("width", "Ширина, мм (поперёк конька)")}
+        ${field("length", "Длина, мм (вдоль конька)")}
+        ${field("box", "Стены", { options: [["gas", "Газобетон / пеноблок"], ["brick", "Кирпич"], ["timber", "Брус / бревно"], ["frame", "Каркас"]], full: true })}
+      </div></div>
+      <div class="card"><h3>Крыша</h3><div class="grid">
+        <label class="f">Высота конька над мауэрлатом, мм<input data-height type="number" inputmode="decimal" value="${Math.round(heightOf(p))}"></label>
+        ${field("over", "Свес по горизонтали, мм")}
+        ${field("form", "Тип крыши", { options: [["gable", "Двускатная"], ["hip", "Вальмовая"]] })}
+        ${field("material", "Кровельный материал", { options: MATERIALS.map((m) => [m.k, m.t]) })}
+      </div><div id="slopeInfo"></div></div>
+      <div class="card" id="advice"></div>`;
+    bindFields(v, projectOut);
+    $("[data-height]", v).addEventListener("input", (e) => {
+      const raw = Number(String(e.target.value).replace(",", "."));
+      if (raw > 0) { P().height = raw; save(); projectOut(); }
+    });
+    projectOut();
+  }
+  function projectOut() {
+    const p = P();
+    const mat = materialOf(p);
+    const ang = angleOf(p);
+    const okSlope = ang >= mat.min;
+    $("#slopeInfo").innerHTML = `<div class="res" style="margin-top:12px">
+        <span class="k">Уклон получается</span><span class="v big" style="color:${okSlope ? "inherit" : "var(--accent)"}">${fmt(ang, 1)}°</span>
+        <span class="k">Минимум для материала</span><span class="v">${mat.min}°</span>
+        <span class="k">Вес кровли</span><span class="v">${mat.w} кг/м²</span></div>
+      ${okSlope ? "" : `<div class="warn">Уклон меньше минимального для «${mat.t}». Поднимите конёк хотя бы до ${f0((num(p.width, 8000) / 2) * Math.tan(rad(mat.min)))} мм или выберите другой материал.</div>`}`;
     const out = [];
-    if (p.roof === "heavy" && (p.box === "timber" || p.box === "frame"))
-      out.push(`<div class="warn">Тяжёлая черепица на ${p.box === "timber" ? "брусовом" : "каркасном"} доме: в книге (глава 2.8) объяснено, почему так делать не стоит. Выберите лёгкую кровлю или закажите расчёт.</div>`);
+    if (mat.heavy && (p.box === "timber" || p.box === "frame"))
+      out.push(`<div class="warn">${mat.t} на ${p.box === "timber" ? "брусовом" : "каркасном"} доме: в книге (глава 2.8) объяснено, почему так делать не стоит. Выберите лёгкую кровлю.</div>`);
     if (p.box === "timber") out.push(`<p class="note">Брус садится: стропила крепите на скользящих опорах, стойки ставьте на компенсаторы усадки.</p>`);
-    if (p.box === "gas") out.push(`<p class="note">Газобетон: нужен сплошной армопояс со шпильками и стропильная система без распора или с затяжкой внизу.</p>`);
+    if (p.box === "gas") out.push(`<p class="note">Газобетон: нужен сплошной армопояс со шпильками и система без распора или с затяжкой внизу.</p>`);
     if (num(p.width, 0) / 2 > 6000) out.push(`<div class="warn">Пролёт больше 12 м без промежуточных опор: нужен расчёт конструктора.</div>`);
-    $("#advice").innerHTML = `<h3>Что учесть</h3>${out.join("") || `<p class="note">Заполните данные: все калькуляторы возьмут их отсюда.</p>`}`;
+    if (ang > 50) out.push(`<p class="note">Уклон круче 50°: крыша будет высокой и парусной, проверьте, этого ли вы хотите.</p>`);
+    $("#advice").innerHTML = `<h3>Что учесть</h3>${out.join("") || `<p class="note">Всё в порядке. Дальше — вкладка «Стропила».</p>`}`;
+  }
+
+  /* ---------- вкладка: карта стропил ---------- */
+  function mapCalc(p) {
+    const { r, ridge, gab, board, sp, run } = rafterCalc(false, p);
+    const W = num(p.width, 8000), L = num(p.length, 10000), over = num(p.over, 0);
+    const sec = C.rafterSection({ span: run, step: num(p.step, 600), roof: materialOf(p).heavy ? 110 : 50, snow: num(p.snow, 180), angle: r.angle });
+    const s = sec.section || { b: 50, h: 200, label: "50×200" };
+    const vol = (len, n, b = s.b, h = s.h) => (len / 1000) * (b / 1000) * (h / 1000) * n;
+    const parts = [];
+    const stdLen = (x) => C.BOARDS.find((b) => b >= x + 50) || null;
+    if (p.form === "hip") {
+      const hp = C.hip({ run, angle: r.angle, over, step: sp.step });
+      const xs = [];
+      for (let i = 0; i <= sp.intervals; i++) xs.push(i * sp.step);
+      const common = xs.filter((x) => x >= run - 1 && x <= L - run + 1).length;
+      parts.push({ name: "Стропила рядовые", n: common * 2 + 2, len: gab, sec: s.label, note: "включая 2 центральных на вальмах" });
+      parts.push({ name: "Накосные стропила (спаренные)", n: 8, len: hp.hipWithOver + 100, sec: s.label, note: "4 угла × 2 доски" });
+      hp.jacks.forEach((j) => parts.push({ name: `Нарожник №${j.n}`, n: 8, len: j.withOver + 150, sec: s.label }));
+      if (ridge.type === "beam") parts.push({ name: "Коньковый прогон", n: 1, len: Math.max(L - 2 * run, 0), sec: "по расчёту" });
+    } else {
+      parts.push({ name: "Стропила", n: sp.rafters, len: gab, sec: s.label, note: `${sp.pairs} пар` });
+      if (ridge.type === "beam") parts.push({ name: "Коньковый прогон", n: 1, len: L + 2 * over, sec: "по расчёту" });
+    }
+    const perim = 2 * (W + L);
+    parts.push({ name: "Мауэрлат 150×150", n: Math.ceil(perim / 6000) + 1, len: 6000, sec: "150×150", b: 150, h: 150, note: `периметр ${fmt(perim / 1000, 1)} м + запас на замки` });
+    let total = 0;
+    parts.forEach((q) => {
+      q.board = q.len === 6000 ? 6000 : q.len <= 6000 ? stdLen(q.len) : null;
+      const b = q.b || s.b, h = q.h || s.h;
+      q.vol = q.sec === "по расчёту" ? 0 : vol(q.board || q.len, q.n, b, h);
+      total += q.vol;
+    });
+    return { r, sp, run, W, L, over, parts, total, sec: s, secOk: !!sec.section };
+  }
+  function viewMap() {
+    const v = $("#view");
+    const p = P();
+    const m = mapCalc(p);
+    const plan = planSvg(p, m);
+    const list = (mm2) => `<table class="parts"><tr><th>Деталь</th><th>Шт.</th><th>Длина</th><th>Доска</th></tr>
+      ${mm2.parts.map((q) => `<tr><td>${q.name}${q.note ? `<small>${q.note}</small>` : ""}</td><td>${q.n}</td><td>${f0(q.len)}</td><td>${q.board ? fmt(q.board / 1000, 1) + " м" : q.len > 6000 ? "сращивать" : "—"}<small>${q.sec}</small></td></tr>`).join("")}
+      </table>
+      <div class="res" style="margin-top:10px"><span class="k">Лес всего (с запасом бери +10 %)</span><span class="v big">${fmt(mm2.total, 2)} м³</span></div>
+      ${mm2.secOk ? "" : `<div class="warn">Сечение 50×200 взято условно: при таком пролёте нужен подкос или расчёт.</div>`}
+      <button class="btn ghost" data-act="sendMap" type="button">Отправить карту в чат</button>`;
+    const sample = mapCalc({ ...DEFAULT, height: 2801 });
+    v.innerHTML = `<h2>Карта стропил</h2>
+      <div class="card"><h3>План сверху</h3><p class="sub">${p.form === "hip" ? "Вальмовая" : "Двускатная"} · ${fmt(m.W / 1000, 1)} × ${fmt(m.L / 1000, 1)} м · шаг ${f0(m.sp.step)} мм. Нажмите, чтобы увеличить</p>${plan}</div>
+      <div class="card"><h3>Что пилить</h3>${S.paid ? list(m) : `<div class="locked-body">${list(sample)}</div>${lockHtml("Карта раскроя", "Все детали крыши с количеством, длинами, сечением и объёмом леса.")}`}</div>
+      <div class="card"><h3>Шаг и снег</h3><div class="grid">
+        ${field("step", "Шаг стропил, мм")}
+        ${field("snow", "Снег", { options: [["100", "Мало"], ["180", "Средне"], ["250", "Много"], ["320", "Очень много"]] })}
+      </div></div>`;
+    bindFields(v, viewMap);
+    v.addEventListener("click", (e) => { const z = e.target.closest("svg.plan"); if (z) openZoom(z.outerHTML); });
+  }
+  function planSvg(p, m) {
+    const Wm = m.W, Lm = m.L, ov = m.over, run = m.run;
+    const VW = 1000, pad = 70;
+    const k = Math.min((VW - 2 * pad) / (Lm + 2 * ov), 560 / (Wm + 2 * ov));
+    const ox = pad + ov * k, oy = 50 + ov * k;
+    const X = (x) => ox + x * k, Y = (y) => oy + y * k;
+    const H = Y(Wm + ov) + 80;
+    let g = `<rect x="${X(-ov)}" y="${Y(-ov)}" width="${(Lm + 2 * ov) * k}" height="${(Wm + 2 * ov) * k}" fill="none" stroke="${BLUE}" stroke-width="2" stroke-dasharray="6 6"/>
+      <rect x="${X(0)}" y="${Y(0)}" width="${Lm * k}" height="${Wm * k}" fill="#f6f2ea" stroke="${INKC}" stroke-width="2.5"/>`;
+    const n = m.sp.intervals;
+    const raf = (x1, y1, x2, y2, c = "#c99a5b", w = 5) => `<line x1="${X(x1).toFixed(1)}" y1="${Y(y1).toFixed(1)}" x2="${X(x2).toFixed(1)}" y2="${Y(y2).toFixed(1)}" stroke="${c}" stroke-width="${w}"/>`;
+    if (p.form === "hip") {
+      for (let i = 0; i <= n; i++) {
+        const x = i * m.sp.step;
+        if (x >= run - 1 && x <= Lm - run + 1) { g += raf(x, -ov, x, Wm / 2) + raf(x, Wm + ov, x, Wm / 2); }
+        else { const d = Math.min(x, Lm - x); if (d > 30) { g += raf(x, -ov, x, d, "#ddc193", 4) + raf(x, Wm + ov, x, Wm - d, "#ddc193", 4); } }
+      }
+      for (let y = m.sp.step; y < Wm - 1; y += m.sp.step) {
+        const d = Math.min(y, Wm - y);
+        g += raf(-ov, y, d, y, "#ddc193", 4) + raf(Lm + ov, y, Lm - d, y, "#ddc193", 4);
+      }
+      g += raf(-ov, Wm / 2, run, Wm / 2) + raf(Lm + ov, Wm / 2, Lm - run, Wm / 2);
+      [[0, 0, run, Wm / 2], [0, Wm, run, Wm / 2], [Lm, 0, Lm - run, Wm / 2], [Lm, Wm, Lm - run, Wm / 2]].forEach(([a, b, c2, d]) => { g += raf(a, b, c2, d, "#8a4b2a", 9); });
+      g += raf(run, Wm / 2, Lm - run, Wm / 2, INKC, 4);
+    } else {
+      for (let i = 0; i <= n; i++) {
+        const x = i * m.sp.step;
+        g += raf(x, -ov, x, Wm + ov);
+        if (i % 2 === 0 || i === n) g += `<text x="${X(x).toFixed(1)}" y="${(Y(-ov) - 12).toFixed(1)}" font-size="22" text-anchor="middle" fill="#6f6c66">${i + 1}</text>`;
+      }
+      g += raf(-ov, Wm / 2, Lm + ov, Wm / 2, INKC, 4);
+    }
+    g += arrowDim([X(0), Y(Wm + ov)], [X(Lm), Y(Wm + ov)], `${f0(Lm)}`, 34, { fs: 26 });
+    g += arrowDim([X(-ov), Y(0)], [X(-ov), Y(Wm)], `${f0(Wm)}`, 30, { fs: 26 });
+    return `<svg class="draw plan" viewBox="0 0 ${VW} ${H.toFixed(0)}" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,sans-serif">${g}</svg>`;
+  }
+
+  /* ---------- вкладка: книга ---------- */
+  function viewBook() {
+    const v = $("#view");
+    const toc = (window.CHECKLISTS || []).filter((c) => c.chapter <= 15).map((c) => `<div class="list-row"><span>Глава ${c.chapter}</span><span style="text-align:right">${c.title}</span></div>`).join("");
+    v.innerHTML = `<h2>Книга</h2>
+      <div class="card book-hero"><div class="book-kicker">Инструкция кровельщика</div>
+        <div class="book-title">Крыша без переделок</div>
+        <p>Как самому выбрать, рассчитать и собрать крышу, которую не придётся переделывать. 94 страницы, 36 чертежей узлов, чек-листы на каждый этап.</p>
+        ${CFG.BOOK_URL ? `<button class="btn" data-act="book" type="button">Купить книгу</button>` : `<p class="note">Ссылка на покупку появится здесь.</p>`}
+      </div>
+      <div class="card"><h3>Доступ к приложению</h3>
+        <p>${S.paid ? "У вас полный доступ навсегда. Спасибо!" : "Бесплатно: проект, уклон и длина стропил, план сверху, первый чек-лист, часть советов. Полный доступ открывает разметку доски и кондуктор, карту раскроя, сечения, все чек-листы, советы и чертежи."}</p>
+        ${S.paid ? "" : `<button class="btn" data-act="buy" type="button">Полный доступ за ${CFG.PRICE_STARS || 350} ⭐</button>
+          <p class="note">Купили книгу? Введите код из письма:</p>
+          <input id="code" type="text" placeholder="ROOF-XXXXXX или промокод" autocapitalize="characters">
+          <button class="btn ghost" data-act="redeem" type="button">Активировать код</button>`}
+      </div>
+      <div class="card"><h3>Содержание</h3>${toc}<div class="list-row"><span>Приложения</span><span style="text-align:right">Словарь, таблицы, бланки, сводный чек-лист</span></div></div>
+      ${CFG.AUTHOR_CONTACT ? `<div class="card"><button class="btn ghost" data-act="author" type="button">Написать автору</button></div>` : ""}
+      ${!CFG.API_URL ? `<div class="card"><h3>Демо-режим</h3><p class="note" style="margin-top:0">Сервер не подключён. Переключите доступ для проверки.</p>
+        <button class="btn ghost" data-act="demo" type="button">${S.paid ? "Выключить" : "Включить"} полный доступ</button></div>` : ""}`;
+  }
+
+  /* ---------- вкладка: советы и чертежи ---------- */
+  const FREE_TIPS = 6;
+  function viewTips() {
+    const v = $("#view");
+    const tips = window.TIPS || [];
+    const draws = window.DRAWINGS || [];
+    const tipHtml = (t, i) => {
+      const locked = !S.paid && i >= FREE_TIPS;
+      return `<div class="tip ${t.kind}${locked ? " locked" : ""}"><div class="tip-kind">${t.kind === "hack" ? "Лайфхак" : "Ошибка"}${t.title ? ` · ${t.title}` : ""}</div>
+        <div class="tip-text">${locked ? "Откройте полный доступ, чтобы прочитать." : t.text}</div><div class="tip-src">${t.ch ? `Глава ${t.ch}` : "Введение"}</div></div>`;
+    };
+    v.innerHTML = `<h2>Советы и чертежи</h2>
+      <div class="seg" id="tipSeg"><button type="button" class="on" data-ts="tips">Советы (${tips.length})</button><button type="button" data-ts="draw">Чертежи (${draws.length})</button></div>
+      <div id="tipBody" style="margin-top:12px"></div>`;
+    const show = (w) => {
+      v.querySelectorAll("[data-ts]").forEach((b) => b.classList.toggle("on", b.dataset.ts === w));
+      $("#tipBody").innerHTML = w === "tips"
+        ? tips.map(tipHtml).join("") + (S.paid ? "" : `<button class="btn" data-act="buy" type="button">Открыть все ${tips.length} советов</button>`)
+        : `<div class="card">${draws.map((d) => `<div class="cl-item" data-draw="${d.file}" data-free="${d.free ? 1 : 0}"><div class="t">${d.title}<small>${d.free || S.paid ? "открыть" : "🔒 полный доступ"}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>`;
+    };
+    v.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-ts]");
+      if (b) return show(b.dataset.ts);
+      const d = e.target.closest("[data-draw]");
+      if (d) {
+        if (d.dataset.free !== "1" && !S.paid) return buy();
+        try { openZoom(await (await fetch(d.dataset.draw)).text()); } catch (_) { toast("Не удалось открыть чертёж"); }
+      }
+    });
+    show("tips");
   }
 
   /* ---------- вкладка: стропила ---------- */
-  const rad = (d) => (d * Math.PI) / 180;
   // буквы на схеме: какое поле проекта правит каждая. Уклон можно задать углом Q или высотой H.
   const LETTERS = {
     A: { k: "h", t: "A — высота доски", u: "мм" },
-    Q: { k: "angle", t: "Q — уклон. Высота конька H пересчитается сама", u: "°" },
-    H: { k: "angle", t: "H — высота конька над мауэрлатом. Уклон Q пересчитается сам", u: "мм",
-      get: (p) => Math.round((num(p.width, 8000) / 2) * Math.tan(rad(num(p.angle, 35)))),
-      set: (v, p) => Math.round(((Math.atan(v / (num(p.width, 8000) / 2)) * 180) / Math.PI) * 10) / 10 },
+    Q: { k: "height", t: "Q — уклон. Высота конька H пересчитается сама", u: "°",
+      get: (p) => Math.round(angleOf(p) * 10) / 10,
+      set: (v, p) => Math.round((num(p.width, 8000) / 2) * Math.tan(rad(Math.min(v, 75)))) },
+    H: { k: "height", t: "H — высота конька над мауэрлатом. Уклон Q пересчитается сам", u: "мм",
+      get: (p) => Math.round(heightOf(p)) },
     C: { k: "width", t: "C — заложение: от наружной грани мауэрлата до оси конька", u: "мм", get: (p) => num(p.width, 8000) / 2, set: (v) => v * 2 },
     D: { k: "over", t: "D — свес по горизонтали", u: "мм" },
     d: { k: "d", t: "d — глубина опорного запила (пусто — четверть доски)", u: "мм", allowEmpty: true },
@@ -157,10 +334,6 @@
         <p class="note" id="ridgeNote"></p>
       </div>
       <div id="out"></div>
-      <div class="card"><h3>Дом и шаг</h3><div class="grid">
-        ${field("length", "Длина дома, мм")}
-        ${field("step", "Шаг стропил, мм")}
-      </div></div>
       <div class="card"><h3>Сращивание доски</h3><p class="sub">Рекомендация автора: косой замок с двумя упорами. Нажмите на чертёж, чтобы увеличить</p><div id="splice"></div>
         <p class="note">Стык располагают над опорой или рядом с ней. Крепёж — два шурупа или болта навстречу друг другу, через упоры, как показано стрелками.</p></div>`;
     bindFields(v, rafterOut);
@@ -179,11 +352,23 @@
     });
     rafterOut();
   }
+  function secLabel(p, run, r) {
+    const sec = C.rafterSection({ span: run, step: num(p.step, 600), roof: materialOf(p).heavy ? 110 : 50, snow: num(p.snow, 180), angle: r.angle });
+    if (!sec.section) return sec.withStrut ? `с подкосом ${sec.withStrut.label}` : "нужен расчёт";
+    return sec.withStrut && sec.withStrut.b * sec.withStrut.h < sec.section.b * sec.section.h ? `${sec.section.label} (с подкосом ${sec.withStrut.label})` : sec.section.label;
+  }
+  function fitSvg(svg) {        // длинные чертежи — 1500 px с прокруткой, компактные — по ширине экрана
+    const vb = (svg.match(/viewBox="([^"]+)"/) || [])[1];
+    const [, , w, h] = vb ? vb.split(/\s+/).map(Number) : [0, 0, 1, 1];
+    const wide = w / h > 2.6;
+    return svg.replace(/^(<svg[^>]*?)\s*class="[^"]*"/, "$1").replace(/^(<svg[^>]*?)\s(width|height)="[^"]*"/, "$1").replace(/^(<svg[^>]*?)\s(width|height)="[^"]*"/, "$1")
+      .replace("<svg", `<svg class="zoomed" style="width:${wide ? "1500px" : "100%"};max-width:${wide ? "none" : "900px"}"`);
+  }
   function openZoom(svg) {
     const bg = document.createElement("div");
     bg.className = "zoom";
     bg.innerHTML = `<div class="zoom-bar"><span>Прокрутите в сторону · удобнее держать телефон горизонтально</span><button type="button" data-close>Закрыть</button></div>
-      <div class="zoom-body">${svg.replace('class="draw board"', 'class="zoomed"')}</div>`;
+      <div class="zoom-body">${fitSvg(svg)}</div>`;
     document.body.appendChild(bg);
     if (tg && tg.BackButton) { tg.BackButton.show(); tg.BackButton.onClick(function cl() { bg.remove(); tg.BackButton.hide(); tg.BackButton.offClick(cl); }); }
     bg.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) { bg.remove(); if (tg && tg.BackButton) tg.BackButton.hide(); } });
@@ -213,10 +398,10 @@
     });
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") done(); });
   }
-  function rafterCalc(sample = false) {
-    const p = sample ? { width: 8000, angle: 35, over: 500, h: 200, d: "", plate: 150, ridge: P().ridge, beamW: 150, dr: "", length: 10000, step: 600 } : P();
+  function rafterCalc(sample = false, pp = null) {
+    const p = sample ? { ...DEFAULT, height: 2801, ridge: P().ridge } : pp || P();
     const run = num(p.width, 8000) / 2;
-    const r = C.rafter({ run, angle: num(p.angle, 35), over: num(p.over, 0), h: num(p.h, 200),
+    const r = C.rafter({ run, angle: angleOf(p), over: num(p.over, 0), h: num(p.h, 200),
       d: p.d === "" ? null : num(p.d, null), plate: num(p.plate, 150) });
     const ridge = C.ridgeEnd({ run, angle: r.angle, h: r.h, type: p.ridge || "butt", beamW: num(p.beamW, 150), dr: p.dr === "" ? null : num(p.dr, null) });
     const xmin = -r.lenOver, xmax = Math.max(...ridge.pts.map((q) => q[0]));
@@ -238,6 +423,7 @@
         <span class="k">H — высота конька над мауэрлатом</span><span class="v">${mm(r.rise)}</span>
         <hr><span class="k">Габарит доски с резами</span><span class="v big">${mm(gab)}</span>
         <span class="k">Брать доску</span><span class="v">${board ? m(board) : "сращивать"}</span>
+        <span class="k">Сечение доски</span><span class="v">${S.paid ? secLabel(p, run, r) : "🔒"}</span>
         <hr><span class="k">Стропильных пар</span><span class="v">${sp.pairs} (${sp.rafters} шт.)</span>
         <span class="k">Фактический шаг</span><span class="v">${mm(sp.step)}</span>
       </div>
@@ -527,38 +713,6 @@
     doc.save(fname);
   }
 
-  /* ---------- вкладка: сечения ---------- */
-  function viewSection() {
-    const p = P();
-    const v = $("#view");
-    const body = `<div class="card"><h3>Стропила</h3><div class="grid">
-        ${field("spanR", "Пролёт стропила по горизонтали, мм", { ph: String(num(p.width, 8000) / 2) })}
-        ${field("step", "Шаг, мм")}
-        ${field("roof", "Кровля", { options: [["light", "Лёгкая (50 кг/м²)"], ["heavy", "Черепица (110 кг/м²)"]] })}
-        ${field("snow", "Снег", { options: [["100", "Мало (100 кг/м²)"], ["180", "Средне (180 кг/м²)"], ["250", "Много (250 кг/м²)"], ["320", "Очень много (320 кг/м²)"]] })}
-      </div><div id="outR"></div></div>
-      <div class="card"><h3>Балки перекрытия</h3><div class="grid">
-        ${field("beamSpan", "Пролёт балки между опорами, мм", { ph: String(num(p.width, 8000) / 2) })}
-        ${field("attic", "Назначение", { options: [["mansard", "Жилая мансарда"], ["cold", "Холодный чердак"]] })}
-      </div><div id="outB"></div></div>
-      <p class="note" style="margin:0 4px 12px">Сосна 2 сорта, прогиб стропил до 1/200, балок до 1/250 пролёта. Пролёт стропила — расстояние по горизонтали между опорами. Для пролётов больше 6 м и необычных нагрузок нужен расчёт конструктора.</p>`;
-    v.innerHTML = `<h2>Сечения</h2>` + (S.paid ? body : `<div class="card"><div class="locked-body">${body}</div>${lockHtml("Подбор сечений", "Сечение стропил и балок по пролёту, шагу, кровле и снегу — по методике книги.")}</div>`);
-    if (S.paid) { bindFields(v, sectionOut); sectionOut(); }
-  }
-  function sectionOut() {
-    const p = P();
-    const span = num(p.spanR, num(p.width, 8000) / 2);
-    const rs = C.rafterSection({ span, step: num(p.step, 600), roof: p.roof === "heavy" ? 110 : 50, snow: num(p.snow, 180), angle: num(p.angle, 35) });
-    let h = `<div class="res" style="margin-top:12px"><span class="k">Сечение доски</span><span class="v big">${rs.section ? rs.section.label : "нужен расчёт"}</span></div>`;
-    if (rs.withStrut && (!rs.section || rs.section.b * rs.section.h > rs.withStrut.b * rs.withStrut.h))
-      h += `<p class="note">С подкосом или ригелем посередине пролёта хватит доски <b>${rs.withStrut.label}</b>.</p>`;
-    if (num(p.step, 600) > 900) h += `<div class="warn">Шаг больше 900 мм: обрешётку 25 мм нужно заменить на более толстую.</div>`;
-    $("#outR").innerHTML = h;
-    const bs = C.beamSection({ span: num(p.beamSpan, num(p.width, 8000) / 2), step: num(p.step, 600), load: p.attic === "cold" ? 200 : 400 });
-    $("#outB").innerHTML = `<div class="res" style="margin-top:12px"><span class="k">Сечение балки</span><span class="v big">${bs.section ? bs.section.label : "разбейте пролёт"}</span></div>
-      ${!bs.section ? `<div class="warn">Больше 6 м из цельной доски не подобрать: поставьте прогон на внутреннюю стену или колонну.</div>` : ""}`;
-  }
-
   /* ---------- вкладка: чек-листы ---------- */
   const FREE_LISTS = ["ch01"];
   function viewCheck() {
@@ -600,26 +754,6 @@
       saveProg(); haptic();
       if (set.size === c.items.length) toast("Этап пройден ✓");
     }));
-  }
-
-  /* ---------- вкладка: ещё ---------- */
-  function viewMore() {
-    const v = $("#view");
-    v.innerHTML = `<h2>Ещё</h2>
-      <div class="card"><h3>Доступ</h3>
-        <p>${S.paid ? "У вас полный доступ навсегда. Спасибо!" : `Бесплатно: уклон, длина стропил, шаг и первый чек-лист. Полный доступ открывает запил и кондуктор для печати, вальмы, подбор сечений и все ${(window.CHECKLISTS || []).length} чек-листов.`}</p>
-        ${S.paid ? "" : `<button class="btn" data-act="buy" type="button">Полный доступ за ${CFG.PRICE_STARS || 350} ⭐</button>`}
-      </div>
-      ${S.paid ? "" : `<div class="card"><h3>Купили книгу?</h3><p class="note" style="margin-top:0">Введите код из письма с книгой.</p>
-        <input id="code" type="text" placeholder="Например, ROOF-7K2P" autocapitalize="characters">
-        <button class="btn ghost" data-act="redeem" type="button">Активировать код</button></div>`}
-      <div class="card"><h3>Книга «Крыша без переделок»</h3>
-        <p class="note" style="margin-top:0">Всё, что считает приложение, в книге объяснено с чертежами: почему такой запил, где сращивать, что ставится до покрытия.</p>
-        ${CFG.BOOK_URL ? `<button class="btn ghost" data-act="book" type="button">Открыть книгу</button>` : ""}
-        ${CFG.AUTHOR_CONTACT ? `<button class="btn ghost" data-act="author" type="button">Написать автору</button>` : ""}
-      </div>
-      ${!CFG.API_URL ? `<div class="card"><h3>Демо-режим</h3><p class="note" style="margin-top:0">Сервер не подключён. Переключите доступ для проверки.</p>
-        <button class="btn ghost" data-act="demo" type="button">${S.paid ? "Выключить" : "Включить"} полный доступ</button></div>` : ""}`;
   }
 
   /* ---------- проекты ---------- */
@@ -688,6 +822,17 @@
     try { await navigator.clipboard.writeText(text); toast("Скопировано"); } catch (_) { toast("Не удалось отправить"); }
   }
 
+  async function sendMap() {
+    const p = P(), m = mapCalc(p);
+    const text = `Карта стропил · ${p.name}\n${p.form === "hip" ? "Вальмовая" : "Двускатная"}, ${fmt(m.W)}×${fmt(m.L)} мм, уклон ${fmt(m.r.angle, 1)}°, шаг ${fmt(m.sp.step)} мм\n\n` +
+      m.parts.map((q) => `${q.name}: ${q.n} шт. × ${fmt(q.len)} мм${q.board ? ` (доска ${fmt(q.board / 1000, 1)} м)` : ""}, ${q.sec}`).join("\n") +
+      `\n\nЛес всего: ${fmt(m.total, 2)} м³ (+10 % запас)`;
+    if (CFG.API_URL && tg) {
+      try { const res = await api("sendText", { text }); if (res.ok) return toast("Отправлено в чат"); } catch (_) {}
+    }
+    try { await navigator.clipboard.writeText(text); toast("Скопировано"); } catch (_) { toast("Не удалось отправить"); }
+  }
+
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-act]");
     if (!b) return;
@@ -696,13 +841,14 @@
     if (a === "redeem") redeem();
     if (a === "jig") makeJig();
     if (a === "sendRafter") sendRafter();
+    if (a === "sendMap") sendMap();
     if (a === "book") tg ? tg.openLink(CFG.BOOK_URL) : window.open(CFG.BOOK_URL);
     if (a === "author") tg ? tg.openTelegramLink("https://t.me/" + CFG.AUTHOR_CONTACT.replace("@", "")) : 0;
     if (a === "demo") { try { localStorage.setItem("demoPaid", S.paid ? "0" : "1"); } catch (_) {} checkAccess().then(render); }
   });
 
   /* ---------- навигация ---------- */
-  const VIEWS = { project: viewProject, rafter: viewRafter, section: viewSection, check: viewCheck, more: viewMore };
+  const VIEWS = { project: viewProject, rafter: viewRafter, map: viewMap, book: viewBook, check: viewCheck, tips: viewTips };
   function render() {
     $("#projectName").textContent = P().name || "—";
     document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.tab));
@@ -716,6 +862,10 @@
   (async function init() {
     try { S.projects = JSON.parse((await store.get("projects")) || "[]"); } catch (_) { S.projects = []; }
     if (!S.projects.length) S.projects = [{ ...DEFAULT, id: "p1" }];
+    S.projects.forEach((p) => {
+      if (p.height == null || p.height === "") p.height = Math.round(heightOf(p));
+      if (!p.material) p.material = p.roof === "heavy" ? "cpc" : "metal";
+    });
     S.cur = (await store.get("current")) || S.projects[0].id;
     if (!S.projects.find((p) => p.id === S.cur)) S.cur = S.projects[0].id;
     await loadProg();
