@@ -128,21 +128,55 @@
   }
 
   /* ---------- вкладка: стропила ---------- */
+  // буквы на схеме: какое поле проекта правит каждая
+  const LETTERS = {
+    A: { k: "h", t: "A — высота доски", u: "мм" },
+    Q: { k: "angle", t: "Q — уклон", u: "°" },
+    C: { k: "width", t: "C — заложение: от наружной грани мауэрлата до оси конька", u: "мм", get: (p) => num(p.width, 8000) / 2, set: (v) => v * 2 },
+    D: { k: "over", t: "D — свес по горизонтали", u: "мм" },
+    d: { k: "d", t: "d — глубина запила (пусто — четверть доски)", u: "мм", allowEmpty: true },
+    M: { k: "plate", t: "M — ширина мауэрлата", u: "мм" },
+  };
   function viewRafter() {
     const v = $("#view");
     v.innerHTML = `<h2>Стропила</h2>
-      <div class="card"><div class="grid">
-        ${field("width", "Ширина дома, мм")}
-        ${field("angle", "Уклон, °")}
-        ${field("over", "Свес по горизонтали, мм")}
-        ${field("h", "Высота доски, мм")}
-        ${field("plate", "Ширина мауэрлата, мм")}
-        ${field("d", "Глубина запила, мм", { ph: "авто: ¼ доски" })}
+      <div class="card bp-card"><div id="bp"></div><p class="bp-hint">Нажмите на букву, чтобы ввести размер</p></div>
+      <div id="out"></div>
+      <div class="card"><h3>Дом и шаг</h3><div class="grid">
         ${field("length", "Длина дома, мм")}
         ${field("step", "Шаг стропил, мм")}
-      </div></div><div id="out"></div>`;
+      </div></div>`;
     bindFields(v, rafterOut);
+    v.addEventListener("click", (e) => {
+      const t = e.target.closest("[data-letter]");
+      if (t) editLetter(t.dataset.letter);
+    });
     rafterOut();
+  }
+  function editLetter(L) {
+    const def = LETTERS[L];
+    if (!def) return;
+    const p = P();
+    const cur = def.get ? def.get(p) : p[def.k];
+    const bg = document.createElement("div");
+    bg.className = "sheet-bg";
+    bg.innerHTML = `<div class="sheet"><h3>${def.t}</h3>
+      <input id="letterIn" type="number" inputmode="decimal" value="${cur === "" || cur == null ? "" : cur}" placeholder="${def.allowEmpty ? "авто" : ""}">
+      <button class="btn" type="button" data-ok>Готово, ${def.u}</button></div>`;
+    document.body.appendChild(bg);
+    const inp = $("#letterIn", bg);
+    setTimeout(() => inp.focus(), 50);
+    const done = () => {
+      const raw = inp.value.replace(",", ".").trim();
+      if (raw === "" && def.allowEmpty) p[def.k] = "";
+      else if (raw !== "" && !isNaN(raw) && Number(raw) > 0) p[def.k] = def.set ? def.set(Number(raw)) : Number(raw);
+      save(); bg.remove(); rafterOut(); haptic();
+    };
+    bg.addEventListener("click", (e) => {
+      if (e.target === bg) bg.remove();
+      if (e.target.closest("[data-ok]")) done();
+    });
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") done(); });
   }
   function rafterCalc() {
     const p = P();
@@ -154,13 +188,12 @@
   }
   function rafterOut() {
     const { p, r, sp, run } = rafterCalc();
+    $("#bp").innerHTML = blueprintSvg(r, run);
     const sl = C.slope({ angle: r.angle });
-    let html = `<div class="card"><h3>Уклон и длина</h3><div class="res">
+    let html = `<div class="card"><h3>Длина стропила</h3><div class="res">
         <span class="k">Уклон</span><span class="v">${fmt(r.angle, 1)}° · ${fmt(sl.percent)} %</span>
-        <span class="k">Высота конька над мауэрлатом</span><span class="v">${mm(r.rise)}</span>
-        <hr><span class="k">Длина до конька</span><span class="v">${mm(r.lenRidge)}</span>
-        <span class="k">Добавка на свес</span><span class="v">${mm(r.lenOver)}</span>
-        <span class="k">Длина по кромке</span><span class="v big">${mm(r.lenBottom)}</span>
+        <span class="k">H — высота конька над мауэрлатом</span><span class="v">${mm(r.rise)}</span>
+        <hr><span class="k">По нижней кромке со свесом</span><span class="v big">${mm(r.lenBottom)}</span>
         <span class="k">Габарит доски с резами</span><span class="v">${mm(r.boardLen)}</span>
         <span class="k">Брать доску</span><span class="v">${r.board ? m(r.board) : "сращивать"}</span>
         <hr><span class="k">Стропильных пар</span><span class="v">${sp.pairs} (${sp.rafters} шт.)</span>
@@ -169,18 +202,19 @@
       <button class="btn ghost" data-act="sendRafter" type="button">Отправить расчёт в чат</button></div>`;
 
     const rn = S.paid ? r : C.rafter({ run: 4000, angle: 35, over: 500, h: 200 });   // под замком — пример из книги
-    const notch = `<h3>Запил и разметка</h3>${notchSvg(rn)}
+    const sinA = Math.sin((rn.angle * Math.PI) / 180);
+    const layout = `<h3>Разметка доски</h3>${boardSvg(rn)}
       <div class="res">
-        <span class="k">Глубина запила d</span><span class="v">${mm(rn.d)} <small style="color:var(--hint);font-weight:400">(макс. ${rn.dMax})</small></span>
+        <span class="k">От торца свеса до запила (по нижней кромке)</span><span class="v">${mm(rn.lenOver)}</span>
+        <span class="k">От запила до конькового реза</span><span class="v">${mm(rn.lenRidge)}</span>
+        <span class="k">Угол торцевых резов к кромке</span><span class="v">${fmt(rn.plumbAngleToEdge, 1)}°</span>
+        <span class="k">Запил: глубина / по кромке</span><span class="v">${mm(rn.d)} / ${mm(rn.d / sinA)}</span>
         <span class="k">Площадка на мауэрлате</span><span class="v">${mm(rn.seat)}</span>
-        <span class="k">Угол вертикального реза к кромке</span><span class="v">${fmt(rn.plumbAngleToEdge, 1)}°</span>
-        <span class="k">Угол площадки к кромке</span><span class="v">${fmt(rn.seatAngleToEdge, 1)}°</span>
-        <span class="k">Коньковый рез: от вертикали запила по кромке</span><span class="v">${mm(rn.lenRidge)}</span>
       </div>
       ${rn.warnings.map((w) => `<div class="warn">${w}</div>`).join("")}
       <button class="btn" data-act="jig" type="button">Кондуктор 1:1 для печати (PDF)</button>
       <p class="note">Шаблон печатается на листах A4 в натуральную величину. На последнем листе контрольный квадрат 50 мм: проверьте его линейкой, прежде чем вырезать.</p>`;
-    html += `<div class="card">${S.paid ? notch : `<div class="locked-body">${notch}</div>${lockHtml("Запил и кондуктор", "Глубина запила, углы реза и шаблон для печати в натуральную величину.")}`}</div>`;
+    html += `<div class="card">${S.paid ? layout : `<div class="locked-body">${layout}</div>${lockHtml("Разметка и кондуктор", "Развёртка доски со всеми размерами, запил в увеличении и шаблон для печати 1:1.")}`}</div>`;
 
     if (p.form === "hip") {
       const hp = S.paid ? C.hip({ run, angle: r.angle, over: num(p.over, 0), step: sp.step }) : C.hip({ run: 4000, angle: 35, over: 500, step: 588 });
@@ -197,31 +231,121 @@
     $("#out").innerHTML = html;
   }
 
-  function notchSvg(r) {
+  /* --- общие примитивы чертежей --- */
+  const WH = "#ffffff", WD = "rgba(255,255,255,.55)", INKC = "#1d1d1b";
+  const f0 = (v) => Math.round(v).toLocaleString("ru-RU");
+  function ln(x1, y1, x2, y2, w = 1.4, c = WH, dash = "") {
+    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${c}" stroke-width="${w}"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`;
+  }
+  function tick(x, y, c = WH, len = 5) {             // засечка размерной линии под 45°
+    return ln(x - len * 0.7, y + len * 0.7, x + len * 0.7, y - len * 0.7, 1.2, c);
+  }
+  function dimLine(x1, y1, x2, y2, c = WH) {
+    return ln(x1, y1, x2, y2, 1, c) + tick(x1, y1, c) + tick(x2, y2, c);
+  }
+  function txt(x, y, s, anchor = "middle", size = 11.5, fill = INKC, w = 600) {
+    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${size}" font-weight="${w}" text-anchor="${anchor}" fill="${fill}">${s}</text>`;
+  }
+  function tag(x, y, L, val, anchor = "middle", info = false) {   // буква-кнопка со значением
+    const label = `${L} ${val}`;
+    const wPx = 12 + label.length * 7;
+    const x0 = anchor === "middle" ? x - wPx / 2 : anchor === "end" ? x - wPx : x;
+    return `<g class="bp-tag${info ? " info" : ""}" ${info ? "" : `data-letter="${L}"`}>
+      <rect x="${x0.toFixed(1)}" y="${(y - 13).toFixed(1)}" width="${wPx.toFixed(1)}" height="19" rx="9.5"/>
+      <text x="${(x0 + wPx / 2).toFixed(1)}" y="${(y + 1).toFixed(1)}" text-anchor="middle">${label}</text></g>`;
+  }
+
+  /* --- схема-синька: узел стропила с буквами-размерами (схематично, не в масштабе) --- */
+  function blueprintSvg(r, run) {
+    const A = (25 * Math.PI) / 180, t = Math.tan(A), sn = Math.sin(A), cs = Math.cos(A);
+    const P = [80, 168], th = 24;                        // угол мауэрлата, высота доски на схеме
+    const yb = (x) => P[1] - (x - P[0]) * t;            // нижняя кромка стропила
+    const xe = 24, xr = 300;                             // торец свеса, ось конька
+    const dS = 13;                                       // глубина запила на схеме
+    const V = [P[0], P[1] + dS], Hn = [P[0] + dS / t, P[1]];
+    // нижняя кромка проходит через V; торцы — по отвесу
+    const yb2 = (x) => V[1] - (x - V[0]) * t;
+    const eb = [xe, yb2(xe)], rb = [xr, yb2(xr)];
+    const etop = [xe, yb2(xe) - th / cs], rtop = [xr, yb2(xr) - th / cs];
+    const rafter = `M${eb[0]},${eb[1].toFixed(1)} L${V[0]},${V[1]} L${P[0]},${P[1]} L${Hn[0].toFixed(1)},${Hn[1]} L${rb[0]},${rb[1].toFixed(1)} L${rtop[0]},${rtop[1].toFixed(1)} L${etop[0]},${etop[1].toFixed(1)} Z`;
+    // мауэрлат со штриховкой
+    const pw = 40, ph = 44;
+    let hatch = "";
+    for (let i = -ph; i < pw; i += 9) {
+      const x1 = Math.max(0, i), y1 = Math.max(0, -i) ;
+      const x2 = Math.min(pw, i + ph), y2 = Math.min(ph, pw - i);
+      hatch += ln(P[0] + x1, P[1] + ph - y1, P[0] + x2, P[1] + ph - (x2 - i), 0.8, WD);
+    }
+    const plate = `<rect x="${P[0]}" y="${P[1]}" width="${pw}" height="${ph}" fill="none" stroke="${WH}" stroke-width="1.6"/>${hatch}`;
+    const yBase = 238;
+    const mid = 176, mb = [mid, yb2(mid)], mt = [mid - th * sn, yb2(mid) - th * cs];
+    const arcR = 48;
+    const arc = `<path d="M${P[0] + arcR},${P[1]} A${arcR},${arcR} 0 0 0 ${(P[0] + arcR * cs).toFixed(1)},${(P[1] - arcR * sn).toFixed(1)}" fill="none" stroke="${WH}" stroke-width="1"/>`;
+    return `<svg class="bp" viewBox="0 0 360 266" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
+      ${plate}
+      <path d="${rafter}" fill="#5c9fd6" fill-opacity=".55" stroke="${WH}" stroke-width="1.8" stroke-linejoin="round"/>
+      <polyline points="${V.join(",")} ${P.join(",")} ${Hn[0].toFixed(1)},${Hn[1]}" fill="none" stroke="#ffe08a" stroke-width="2.8"/>
+      ${ln(P[0], P[1], 344, P[1], 0.9, WD, "4 3")}
+      ${ln(xr, rtop[1] - 8, xr, yBase + 6, 0.9, WD, "8 3 2 3")}
+      ${arc}
+      ${ln(xe, etop[1], xe, yBase + 5, 0.8, WD)}${ln(P[0], P[1] + ph, P[0], yBase + 5, 0.8, WD)}
+      ${dimLine(xe, yBase, P[0], yBase)}${dimLine(P[0], yBase, xr, yBase)}
+      ${ln(xr + 4, rb[1], 342, rb[1], 0.8, WD)}${dimLine(336, P[1], 336, rb[1])}
+      ${dimLine(mb[0], mb[1], mt[0], mt[1])}
+      ${tag((xe + P[0]) / 2 + 4, yBase + 20, "D", f0(r.over))}
+      ${tag((P[0] + xr) / 2, yBase + 20, "C", f0(run))}
+      ${tag(330, (P[1] + rb[1]) / 2 + 4, "H", f0(r.rise), "end", true)}
+      ${tag(mt[0] - 6, mt[1] - 10, "A", f0(r.h))}
+      ${tag(P[0] + arcR + 44, P[1] + 18, "Q", `${fmt(r.angle, 1)}°`)}
+      ${tag(P[0] - 6, P[1] + 40, "d", f0(r.d), "end")}${ln(P[0] - 8, P[1] + 30, P[0] - 1, P[1] + dS / 2 + 1, 0.8, WH)}
+      ${tag(P[0] + pw / 2, P[1] + ph + 22, "M", f0(r.plate))}
+    </svg>`;
+  }
+
+  /* --- развёртка доски для разметки + выносной круг запила --- */
+  function boardSvg(r) {
     const a = (r.angle * Math.PI) / 180, s = Math.sin(a), c = Math.cos(a), t = Math.tan(a);
-    const h = r.h, d = r.d, pl = r.plate;
-    const ux = c, uy = -s, nx = -s, ny = -c;            // ось Y вниз
-    const V = [0, d], H = [d / t, 0];
-    const back = Math.min(r.lenOver, 700) + 60, fwd = 650;
-    const Eb = [V[0] - back * ux, V[1] - back * uy];
-    const Tb = [V[0] + fwd * ux, V[1] + fwd * uy];
-    const Tt = [Tb[0] + h * nx, Tb[1] + h * ny];
-    const tt = (Eb[0] - (V[0] + h * nx)) / ux;
-    const Et = [V[0] + h * nx + tt * ux, V[1] + h * ny + tt * uy];
-    const pts = [Eb, V, [0, 0], H, Tb, Tt, Et];
-    const xs = pts.map((q) => q[0]).concat([pl + 60]), ys = pts.map((q) => q[1]).concat([pl + 80]);
-    const x0 = Math.min(...xs) - 40, y0 = Math.min(...ys) - 40;
-    const w = Math.max(...xs) - x0 + 40, hh = Math.max(...ys) - y0 + 20;
-    const P2 = (q) => `${q[0].toFixed(1)},${q[1].toFixed(1)}`;
-    const fs = w / 26;
-    return `<svg class="draw" viewBox="${x0} ${y0} ${w} ${hh}">
-      <rect x="0" y="0" width="${pl}" height="${pl}" fill="#e6d3b3" stroke="#1d1d1b" stroke-width="${fs / 8}"/>
-      <rect x="-30" y="${pl}" width="${pl + 60}" height="80" fill="#e6e2da" stroke="#1d1d1b" stroke-width="${fs / 10}"/>
-      <polygon points="${pts.map(P2).join(" ")}" fill="#c99a5b" stroke="#1d1d1b" stroke-width="${fs / 7}" stroke-linejoin="round"/>
-      <polyline points="${P2(V)} ${P2([0, 0])} ${P2(H)}" fill="none" stroke="${r.warnings.length ? "#b8322a" : "#2f7d4a"}" stroke-width="${fs / 3}"/>
-      <text x="${-fs * 0.4}" y="${d / 2 + fs * 0.35}" font-size="${fs}" text-anchor="end" fill="#1d1d1b">d ${Math.round(d)}</text>
-      <text x="${H[0] / 2}" y="${-fs * 0.4}" font-size="${fs}" text-anchor="middle" fill="#1d1d1b">${Math.round(r.seat)}</text>
-      <text x="${pl / 2}" y="${pl / 2 + fs * 0.3}" font-size="${fs * 0.85}" text-anchor="middle" fill="#6f6c66">мауэрлат</text>
+    const shift = r.h * t;                               // сдвиг верхней кромки на торцах, мм
+    const total = r.lenOver + r.lenRidge + shift;
+    const X0 = 20, X1 = 340, k = (X1 - X0) / total;     // масштаб по длине (по высоте схематично)
+    const yB = 156, th = 40;
+    const off = shift * k;
+    const xE = X0, xV = X0 + r.lenOver * k, xR = xV + r.lenRidge * k;
+    const nS = Math.max(7, (r.d / s) * k);
+    const board = `M${xE},${yB} L${xV.toFixed(1)},${yB} L${(xV + nS * 0.3).toFixed(1)},${yB - 8} L${(xV + nS).toFixed(1)},${yB} L${xR.toFixed(1)},${yB} L${(xR + off).toFixed(1)},${yB - th} L${(xE + off).toFixed(1)},${yB - th} Z`;
+    // выносной круг: запил в реальных пропорциях
+    const cx = 252, cy = 240, R = 48;
+    const span = r.d / s;
+    const kk = (R * 1.2) / Math.max(span, 1);
+    const nW = span * kk, pX = r.d * s * kk, pY = r.d * c * kk;
+    const bx = cx - nW / 2, by = cy + 8;
+    const D = INKC;
+    const detail = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="#fff" stroke="${D}" stroke-width="1.2"/>
+      <polyline points="${cx - R + 5},${by} ${bx.toFixed(1)},${by} ${(bx + pX).toFixed(1)},${(by - pY).toFixed(1)} ${(bx + nW).toFixed(1)},${by} ${cx + R - 5},${by}" fill="none" stroke="${D}" stroke-width="1.8"/>
+      ${dimLine(bx, by + 12, bx + nW, by + 12, D)}${ln(bx, by, bx, by + 15, 0.6, D)}${ln(bx + nW, by, bx + nW, by + 15, 0.6, D)}
+      ${ln(bx - 5 * c, by - 5 * s, bx + pX - 5 * c, by - pY - 5 * s, 0.9, D)}${tick(bx - 5 * c, by - 5 * s, D, 4)}${tick(bx + pX - 5 * c, by - pY - 5 * s, D, 4)}`;
+    const fa = fmt(r.plumbAngleToEdge, 0);
+    return `<svg class="draw board" viewBox="0 0 360 296" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
+      <path d="${board}" fill="#f1e2c8" stroke="${D}" stroke-width="1.6" stroke-linejoin="round"/>
+      ${ln(xE, yB - th - 2, xE, 34, 0.6, D)}${ln(xE + off, yB - th, xE + off, 34, 0.6, D)}${ln(xR + off, yB - th, xR + off, 34, 0.6, D)}
+      ${dimLine(xE, 40, xE + off, 40, D)}${dimLine(xE + off, 40, xR + off, 40, D)}
+      ${txt(xE + off / 2 + 2, 30, f0(shift), "start", 12)}${txt((xE + off + xR + off) / 2, 30, `${f0(r.lenBottom)} по кромке`, "middle", 13.5, INKC, 700)}
+      ${ln(xV, yB - 10, xV, 64, 0.6, D)}
+      ${dimLine(xE + off, 70, xV, 70, D)}${dimLine(xV, 70, xR + off, 70, D)}
+      ${txt((xE + off + xV) / 2, 62, f0(r.lenOver - shift), "middle", 12)}${txt((xV + xR + off) / 2, 62, f0(r.lenRidge + shift), "middle", 13.5)}
+      ${ln(xE, yB, xE, 182, 0.6, D)}${ln(xV, yB, xV, 182, 0.6, D)}${dimLine(xE, 178, xV, 178, D)}
+      ${txt((xE + xV) / 2, 196, f0(r.lenOver), "middle", 13)}
+      <path d="M${(xR + off - 20).toFixed(1)},${yB - th} A20,20 0 0 1 ${(xR + off - 20 * Math.sin(a) * 0.9).toFixed(1)},${(yB - th + 20 * Math.cos(a) * 0.9).toFixed(1)}" fill="none" stroke="${D}" stroke-width="0.9"/>
+      ${txt(xR - 14, yB - th + 22, `${fa}°`, "end", 13)}
+      <path d="M${(xE + off + 20).toFixed(1)},${yB - th} A20,20 0 0 0 ${(xE + off + 20 * Math.sin(a) * 0.9 - 6).toFixed(1)},${(yB - th + 18).toFixed(1)}" fill="none" stroke="${D}" stroke-width="0.9"/>
+      <circle cx="${(xV + nS / 2).toFixed(1)}" cy="${yB - 3}" r="11" fill="none" stroke="${D}" stroke-width="1"/>
+      ${ln(xV + nS / 2 + 7, yB + 6, cx - R * 0.72, cy - R * 0.7, 0.8, D)}
+      ${detail}
+      ${txt(cx - R + 10, cy - R / 2 + 4, `d ${f0(r.d)}`, "start", 12.5)}${txt(cx, by + 31, f0(span), "middle", 12.5)}
+      ${txt(X0, 240, "Торцы режутся по отвесу:", "start", 11.5, "#6f6c66", 400)}
+      ${txt(X0, 255, `угол ${fa}° к кромке доски.`, "start", 11.5, "#6f6c66", 400)}
+      ${txt(X0, 276, "Размеры по нижней кромке —", "start", 11.5, "#6f6c66", 400)}
+      ${txt(X0, 291, "той, где запил.", "start", 11.5, "#6f6c66", 400)}
     </svg>`;
   }
 

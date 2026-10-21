@@ -96,3 +96,15 @@ svg.draw { width: 100%; height: auto; display: block; margin: 6px 0; }
 .toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: rgba(30, 30, 30, .9); color: #fff;
   padding: 10px 16px; border-radius: 12px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; max-width: 90vw; }
 .toast.show { opacity: 1; }
+
+/* схема-синька на вкладке «Стропила» */
+.bp-card { padding: 0; overflow: hidden; background: linear-gradient(160deg, #7ab9e6 0%, #4f97d1 55%, #3d84c3 100%); }
+svg.bp { display: block; width: 100%; height: auto; }
+.bp-tag { cursor: pointer; }
+.bp-tag rect { fill: rgba(255, 255, 255, .16); stroke: #fff; stroke-width: 1; }
+.bp-tag text { fill: #fff; font-size: 12.5px; font-weight: 700; }
+.bp-tag:active rect { fill: rgba(255, 255, 255, .35); }
+.bp-tag.info { cursor: default; }
+.bp-tag.info rect { fill: none; stroke: rgba(255, 255, 255, .6); stroke-dasharray: 3 2; }
+.bp-hint { margin: 0; padding: 0 14px 10px; color: rgba(255, 255, 255, .85); font-size: 12px; text-align: right; }
+svg.board { background: #fff; border-radius: 10px; }

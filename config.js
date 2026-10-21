@@ -6,3 +6,5 @@ window.APP_CONFIG = {
   BOOK_URL: "",          // ссылка на страницу покупки книги
   AUTHOR_CONTACT: "",    // @username автора для вопросов
 };
+// локальная проверка без Telegram: демо-режим, доступ включается ?paid=1
+if (location.hostname === "localhost" || location.hostname === "127.0.0.1") window.APP_CONFIG.API_URL = "";
