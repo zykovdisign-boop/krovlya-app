@@ -114,9 +114,10 @@
 
   /* ---------- вкладка: проект ---------- */
   function viewProject() {
+    if (S.projMode === "est") return viewEstimate();
     const v = $("#view");
     const p = P();
-    v.innerHTML = `<h2>Проект</h2>
+    v.innerHTML = `<h2>Проект</h2>${projSeg("params")}
       <div class="card"><h3>Основание</h3><div class="grid">
         ${field("name", "Название", { full: true, text: true })}
         ${field("width", "Ширина, мм (поперёк конька)")}
@@ -155,6 +156,40 @@
     if (num(p.width, 0) / 2 > 6000) out.push(`<div class="warn">Пролёт больше 12 м без промежуточных опор: нужен расчёт конструктора.</div>`);
     if (ang > 50) out.push(`<p class="note">Уклон круче 50°: крыша будет высокой и парусной, проверьте, этого ли вы хотите.</p>`);
     $("#advice").innerHTML = `<h3>Что учесть</h3>${out.join("") || `<p class="note">Всё в порядке. Дальше — вкладка «Стропила».</p>`}`;
+  }
+
+  function projSeg(mode) {
+    return `<div class="seg" style="margin-bottom:12px"><button type="button" data-pm="params" class="${mode === "params" ? "on" : ""}">Параметры</button><button type="button" data-pm="est" class="${mode === "est" ? "on" : ""}">Смета</button></div>`;
+  }
+  function viewEstimate() {
+    const v = $("#view");
+    const p = P();
+      v.innerHTML = `<h2>Проект</h2>${projSeg("est")}
+      <div class="card"><div class="grid">
+        <label class="f full"><span><input type="checkbox" data-ins ${p.insulate ? "checked" : ""} style="width:auto;margin-right:8px;vertical-align:-2px">Утепляю скаты (мансарда)</span></label>
+        ${field("wallH", "Высота стен до карниза, мм", { ph: "3000" })}
+        ${field("step", "Шаг стропил, мм")}
+      </div><p class="note">Цены впишите сами — они меняются, а количество посчитано по вашей крыше. Нормы расхода типовые: сверьте с инструкцией производителя материала.</p></div>
+      <div id="estBody"></div>`;
+    const draw = () => { $("#estBody").innerHTML = S.paid ? estimateHtml(p) : `<div class="card"><div class="locked-body">${estimateHtml({ ...DEFAULT, height: 2801, prices: {} }, true)}</div>${lockHtml("Смета", "Все материалы и крепёж: стропила, обрешётка, кровля, доборы, мембрана, водосток, уголки, шпильки, саморезы, гвозди, скобы.")}</div>`; };
+    bindFields(v, draw);
+    $("[data-ins]", v).addEventListener("change", (e) => { P().insulate = e.target.checked; save(); draw(); });
+    v.addEventListener("input", (e) => {
+      const inp = e.target.closest("[data-price]");
+      if (!inp) return;
+      const pp = P(); pp.prices = pp.prices || {};
+      const val = Number(String(inp.value).replace(",", "."));
+      if (inp.value === "" || isNaN(val)) delete pp.prices[inp.dataset.price]; else pp.prices[inp.dataset.price] = val;
+      save(); updateEstTotals();
+    });
+    v.addEventListener("change", (e) => {
+      const cb = e.target.closest("[data-bought]");
+      if (!cb) return;
+      const pp = P(); pp.bought = pp.bought || {};
+      if (cb.checked) pp.bought[cb.dataset.bought] = true; else delete pp.bought[cb.dataset.bought];
+      save(); updateEstTotals(); haptic();
+    });
+    draw();
   }
 
   /* ---------- вкладка: карта стропил ---------- */
@@ -203,32 +238,7 @@
       ${mm2.secOk ? "" : `<div class="warn">Сечение 50×200 взято условно: при таком пролёте нужен подкос или расчёт.</div>`}
       <button class="btn ghost" data-act="sendMap" type="button">Отправить карту в чат</button>`;
     const sample = mapCalc({ ...DEFAULT, height: 2801 });
-    const mode = S.mapMode || "cut";
-    const seg = `<div class="seg" style="margin-bottom:12px"><button type="button" data-mm="cut" class="${mode === "cut" ? "on" : ""}">Раскрой</button><button type="button" data-mm="est" class="${mode === "est" ? "on" : ""}">Смета</button></div>`;
-    if (mode === "est") {
-      v.innerHTML = `<h2>Смета</h2>${seg}
-        <div class="card"><div class="grid">
-          <label class="f full"><span><input type="checkbox" data-ins ${p.insulate ? "checked" : ""} style="width:auto;margin-right:8px;vertical-align:-2px">Утепляю скаты (мансарда)</span></label>
-          ${field("wallH", "Высота стен до карниза, мм", { ph: "3000" })}
-          ${field("step", "Шаг стропил, мм")}
-        </div><p class="note">Цены впишите сами — они меняются, а количество посчитано по вашей крыше. Нормы расхода типовые: сверьте с инструкцией производителя материала.</p></div>
-        <div id="estBody"></div>`;
-      const draw = () => { $("#estBody").innerHTML = S.paid ? estimateHtml(p) : `<div class="card"><div class="locked-body">${estimateHtml({ ...DEFAULT, height: 2801, prices: {} }, true)}</div>${lockHtml("Смета", "Все материалы и крепёж: стропила, обрешётка, кровля, доборы, мембрана, водосток, уголки, шпильки, саморезы, гвозди, скобы.")}</div>`; };
-      bindFields(v, draw);
-      $("[data-ins]", v).addEventListener("change", (e) => { P().insulate = e.target.checked; save(); draw(); });
-      v.addEventListener("click", (e) => { const b = e.target.closest("[data-mm]"); if (b) { S.mapMode = b.dataset.mm; viewMap(); } });
-      v.addEventListener("input", (e) => {
-        const inp = e.target.closest("[data-price]");
-        if (!inp) return;
-        const pp = P(); pp.prices = pp.prices || {};
-        const val = Number(String(inp.value).replace(",", "."));
-        if (inp.value === "" || isNaN(val)) delete pp.prices[inp.dataset.price]; else pp.prices[inp.dataset.price] = val;
-        save(); updateEstTotals();
-      });
-      draw();
-      return;
-    }
-    v.innerHTML = `<h2>Карта стропил</h2>${seg}
+    v.innerHTML = `<h2>Карта стропил</h2>
       <div class="card"><h3>План сверху</h3><p class="sub">${p.form === "hip" ? "Вальмовая" : "Двускатная"} · ${fmt(m.W / 1000, 1)} × ${fmt(m.L / 1000, 1)} м · шаг ${f0(m.sp.step)} мм. Нажмите, чтобы увеличить</p><div id="planBox">${plan}</div></div>
       <div class="card"><h3>Что пилить</h3><div id="cutBox">${S.paid ? list(m) : `<div class="locked-body">${list(sample)}</div>${lockHtml("Карта раскроя", "Все детали крыши с количеством, длинами, сечением и объёмом леса.")}`}</div></div>
       <div class="card"><h3>Шаг и снег</h3><div class="grid">
@@ -240,11 +250,7 @@
       $("#planBox").innerHTML = planSvg(p2, m2);
       if (S.paid) $("#cutBox").innerHTML = list(m2);
     });
-    v.addEventListener("click", (e) => {
-      const b = e.target.closest("[data-mm]");
-      if (b) { S.mapMode = b.dataset.mm; return viewMap(); }
-      const z = e.target.closest("svg.plan"); if (z) openZoom(z.outerHTML);
-    });
+    v.addEventListener("click", (e) => { const z = e.target.closest("svg.plan"); if (z) openZoom(z.outerHTML); });
   }
 
   /* ---------- смета ---------- */
@@ -264,10 +270,10 @@
   }
   function estimateHtml(p, sample = false) {
     const e = estimateCalc(p);
-    const prices = p.prices || {};
+    const prices = p.prices || {}, bought = p.bought || {};
     const q = (x) => (Number.isInteger(x) ? f0(x) : fmt(x, 2));
     const rows = e.groups.map((g) => `<div class="card"><h3>${g.group}</h3><table class="parts est">
-      ${g.items.map((it) => `<tr><td>${it.name}${it.note ? `<small>${it.note}</small>` : ""}</td>
+      ${g.items.map((it) => `<tr data-row="${it.key}" class="${bought[it.key] ? "bought" : ""}"><td class="cb"><input type="checkbox" data-bought="${it.key}" ${bought[it.key] ? "checked" : ""} ${sample ? "disabled" : ""} aria-label="Куплено"></td><td>${it.name}${it.note ? `<small>${it.note}</small>` : ""}</td>
         <td class="qty">${q(it.qty)}<small>${it.unit}</small></td>
         <td class="pr"><input data-price="${it.key}" data-qty="${it.qty}" type="number" inputmode="decimal" placeholder="цена" value="${prices[it.key] ?? ""}" ${sample ? "disabled" : ""}></td>
         <td class="sum" data-sum="${it.key}"></td></tr>`).join("")}
@@ -277,40 +283,138 @@
         <span class="k">Площадь кровли по скатам</span><span class="v">${fmt(e.area, 1)} м²</span>
         <span class="k">Карниз / конёк</span><span class="v">${fmt(e.eave, 1)} / ${fmt(e.ridge, 1)} м</span>
         <hr><span class="k">Итого по смете</span><span class="v big" id="estTotal">—</span>
-      </div>${sample ? "" : `<button class="btn ghost" data-act="sendEst" type="button">Отправить смету в чат</button>`}</div>${rows}`;
+        <span class="k">Куплено</span><span class="v" id="estBought">—</span>
+        <span class="k">Осталось купить</span><span class="v" id="estLeft">—</span>
+      </div>
+      <div class="bar"><i id="estBar" style="width:0%"></i></div>
+      ${sample ? "" : `<button class="btn" data-act="printEst" type="button">Версия для печати (PDF)</button>
+      <button class="btn ghost" data-act="sendEst" type="button">Отправить смету в чат текстом</button>`}</div>${rows}`;
   }
   function updateEstTotals() {
-    let total = 0, filled = 0;
+    let total = 0, filled = 0, boughtSum = 0, nItems = 0, nBought = 0;
     const groups = {};
     document.querySelectorAll("[data-price]").forEach((inp) => {
+      const key = inp.dataset.price;
       const price = Number(String(inp.value).replace(",", "."));
       const qty = Number(inp.dataset.qty);
-      const cell = document.querySelector(`[data-sum="${inp.dataset.price}"]`);
+      const cell = document.querySelector(`[data-sum="${key}"]`);
+      const cb = document.querySelector(`[data-bought="${key}"]`);
+      const isB = cb && cb.checked;
+      const row = document.querySelector(`[data-row="${key}"]`);
+      if (row) row.classList.toggle("bought", !!isB);
+      nItems++; if (isB) nBought++;
       const grp = inp.closest(".card").querySelector("[data-gsum]").dataset.gsum;
       groups[grp] = groups[grp] || 0;
       if (inp.value !== "" && !isNaN(price)) {
         const s = price * qty; total += s; groups[grp] += s; filled++;
+        if (isB) boughtSum += s;
         if (cell) cell.textContent = f0(s);
       } else if (cell) cell.textContent = "";
     });
     document.querySelectorAll("[data-gsum]").forEach((el) => { el.textContent = groups[el.dataset.gsum] ? `${f0(groups[el.dataset.gsum])} ₽` : "—"; });
-    const t = $("#estTotal");
-    if (t) t.textContent = filled ? `${f0(total)} ₽` : "впишите цены";
+    const set = (id, t) => { const el = $(id); if (el) el.textContent = t; };
+    set("#estTotal", filled ? `${f0(total)} ₽` : "впишите цены");
+    set("#estBought", `${nBought} из ${nItems}${filled ? ` · ${f0(boughtSum)} ₽` : ""}`);
+    set("#estLeft", `${nItems - nBought} поз.${filled ? ` · ${f0(total - boughtSum)} ₽` : ""}`);
+    const bar = $("#estBar"); if (bar) bar.style.width = `${nItems ? (nBought / nItems) * 100 : 0}%`;
   }
   async function sendEst() {
-    const p = P(), e = estimateCalc(p), prices = p.prices || {};
+    const p = P(), e = estimateCalc(p), prices = p.prices || {}, bought = p.bought || {};
     let total = 0;
     const lines = e.groups.map((g) => `— ${g.group} —\n` + g.items.map((it) => {
       const pr = prices[it.key];
       const s = pr != null ? pr * it.qty : null;
       if (s) total += s;
-      return `${it.name}: ${Number.isInteger(it.qty) ? it.qty : fmt(it.qty, 2)} ${it.unit}${s ? ` = ${f0(s)} ₽` : ""}`;
+      return `${bought[it.key] ? "✅" : "⬜"} ${it.name}: ${Number.isInteger(it.qty) ? it.qty : fmt(it.qty, 2)} ${it.unit}${s ? ` = ${f0(s)} ₽` : ""}`;
     }).join("\n")).join("\n\n");
     const text = `Смета · ${p.name}\nКровля ${fmt(e.area, 1)} м², ${materialOf(p).t}\n\n${lines}${total ? `\n\nИтого: ${f0(total)} ₽` : ""}`;
     if (CFG.API_URL && tg) {
       try { const res = await api("sendText", { text: text.slice(0, 4000) }); if (res.ok) return toast("Смета в чате"); } catch (_) {}
     }
     try { await navigator.clipboard.writeText(text); toast("Скопировано"); } catch (_) { toast("Не удалось отправить"); }
+  }
+  /* смета для печати: A4, таблица с квадратиками «куплено», рисуется на canvas (кириллица без встраивания шрифтов) */
+  async function printEst() {
+    if (!window.jspdf) return toast("Не загрузилась библиотека PDF. Проверьте интернет.");
+    const p = P(), e = estimateCalc(p), prices = p.prices || {}, bought = p.bought || {};
+    const PX = 6, PW = 210, PH = 297, MX = 14, top0 = 16, bottom = PH - 14;
+    const cols = { cb: MX, name: MX + 9, qty: 128, unit: 131, price: 160, sum: PW - MX };   // мм
+    const pages = [];
+    let cv, g, y;
+    const font = (sz, w = 400) => `${w} ${sz * PX}px -apple-system, "Segoe UI", Roboto, Arial, sans-serif`;
+    const newPage = () => {
+      cv = document.createElement("canvas"); cv.width = PW * PX; cv.height = PH * PX;
+      g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+      g.fillStyle = "#1d1d1b"; g.textBaseline = "alphabetic";
+      pages.push(cv); y = top0;
+    };
+    const text = (t, x, yy, sz, opt = {}) => {
+      g.font = font(sz, opt.w || 400); g.fillStyle = opt.c || "#1d1d1b"; g.textAlign = opt.a || "left";
+      g.fillText(t, x * PX, yy * PX);
+    };
+    const wrap = (t, maxMm, sz) => {
+      g.font = font(sz); const words = String(t).split(" "); const lines = []; let cur = "";
+      for (const w of words) { const tryS = cur ? cur + " " + w : w; if (g.measureText(tryS).width / PX > maxMm && cur) { lines.push(cur); cur = w; } else cur = tryS; }
+      if (cur) lines.push(cur); return lines;
+    };
+    const hline = (yy, c = "#d9d5cc", w = 0.25) => { g.strokeStyle = c; g.lineWidth = w * PX; g.beginPath(); g.moveTo(MX * PX, yy * PX); g.lineTo((PW - MX) * PX, yy * PX); g.stroke(); };
+    const q = (x) => (Number.isInteger(x) ? f0(x) : fmt(x, 2));
+    newPage();
+    // шапка
+    text("Смета на кровлю", MX, y + 6, 6.5, { w: 800 }); y += 12;
+    text(`${p.name} · ${p.form === "hip" ? "вальмовая" : "двускатная"} · ${fmt(num(p.width, 0) / 1000, 1)} × ${fmt(num(p.length, 0) / 1000, 1)} м · уклон ${fmt(angleOf(p), 1)}°`, MX, y, 3.6, { c: "#444" }); y += 5.5;
+    text(`${materialOf(p).t} · площадь скатов ${fmt(e.area, 1)} м² · ${new Date().toLocaleDateString("ru-RU")}`, MX, y, 3.6, { c: "#444" }); y += 7;
+    let total = 0, boughtSum = 0, nB = 0, nAll = 0;
+    for (const grp of e.groups) {
+      if (y > bottom - 20) newPage();
+      text(grp.group.toUpperCase(), MX, y + 4, 3.4, { w: 700, c: "#b8322a" }); y += 6;
+      hline(y, "#1d1d1b", 0.35); y += 1;
+      text("Наименование", cols.name, y + 3.6, 2.8, { c: "#888" }); text("Кол-во", cols.qty, y + 3.6, 2.8, { c: "#888", a: "right" });
+      text("Цена", cols.price, y + 3.6, 2.8, { c: "#888", a: "right" }); text("Сумма", cols.sum, y + 3.6, 2.8, { c: "#888", a: "right" }); y += 5;
+      for (const it of grp.items) {
+        const lines = wrap(it.name, cols.qty - cols.name - 16, 3.4);
+        const noteLines = it.note ? wrap(it.note, cols.qty - cols.name - 16, 2.7) : [];
+        const hRow = 2.2 + lines.length * 4.4 + noteLines.length * 3.4 + 1.6;
+        if (y + hRow > bottom) { newPage(); }
+        const pr = prices[it.key];
+        const sum = pr != null ? pr * it.qty : null;
+        const isB = !!bought[it.key];
+        nAll++; if (isB) nB++;
+        if (sum) { total += sum; if (isB) boughtSum += sum; }
+        // квадратик
+        g.strokeStyle = "#1d1d1b"; g.lineWidth = 0.35 * PX; g.strokeRect(cols.cb * PX, (y + 1.6) * PX, 4.2 * PX, 4.2 * PX);
+        if (isB) { g.lineWidth = 0.6 * PX; g.beginPath(); g.moveTo((cols.cb + 0.8) * PX, (y + 3.8) * PX); g.lineTo((cols.cb + 1.8) * PX, (y + 5) * PX); g.lineTo((cols.cb + 3.6) * PX, (y + 2.2) * PX); g.stroke(); }
+        let yy = y + 5;
+        lines.forEach((ln) => { text(ln, cols.name, yy, 3.4, { c: isB ? "#888" : "#1d1d1b" }); yy += 4.4; });
+        noteLines.forEach((ln) => { text(ln, cols.name, yy - 0.6, 2.7, { c: "#888" }); yy += 3.4; });
+        text(q(it.qty), cols.qty, y + 5, 3.4, { a: "right", w: 600 });
+        text(it.unit, cols.unit, y + 5, 2.8, { c: "#666" });
+        text(pr != null ? f0(pr) : "______", cols.price, y + 5, 3.2, { a: "right", c: pr != null ? "#1d1d1b" : "#bbb" });
+        text(sum ? f0(sum) : "", cols.sum, y + 5, 3.4, { a: "right", w: 600 });
+        y += hRow; hline(y);
+      }
+      y += 4;
+    }
+    if (y > bottom - 26) newPage();
+    hline(y, "#1d1d1b", 0.5); y += 7;
+    text("Итого по смете", MX, y, 4.2, { w: 700 }); text(total ? `${f0(total)} ₽` : "впишите цены", cols.sum, y, 4.6, { w: 800, a: "right" }); y += 6.5;
+    text(`Куплено: ${nB} из ${nAll} позиций`, MX, y, 3.4); text(total ? `${f0(boughtSum)} ₽` : "", cols.sum, y, 3.4, { a: "right" }); y += 5.5;
+    text(`Осталось купить: ${nAll - nB}`, MX, y, 3.4); text(total ? `${f0(total - boughtSum)} ₽` : "", cols.sum, y, 3.4, { a: "right" }); y += 8;
+    text("Количество посчитано по размерам крыши с типовым запасом. Сверьте нормы расхода с инструкцией производителя.", MX, y, 2.7, { c: "#888" });
+    // номера страниц
+    pages.forEach((c, i) => { g = c.getContext("2d"); text(`Крыша без переделок · смета · лист ${i + 1} из ${pages.length}`, PW / 2, PH - 7, 2.6, { c: "#999", a: "center" }); });
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    pages.forEach((c, i) => { if (i) doc.addPage(); doc.addImage(c.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, PW, PH, undefined, "FAST"); });
+    const fname = `smeta_${(p.name || "krysha").replace(/[^\wа-яё]+/gi, "_")}.pdf`;
+    if (CFG.API_URL && tg) {
+      try {
+        toast("Отправляю PDF в чат…");
+        const res = await api("sendDoc", { filename: fname, caption: `Смета: ${p.name}. Печать на A4.`, data: doc.output("datauristring").split(",")[1] });
+        if (res.ok) { toast("Смета в чате с ботом"); haptic("medium"); return; }
+      } catch (_) { /* скачаем файлом */ }
+    }
+    doc.save(fname);
   }
   function planSvg(p, m) {
     const Wm = m.W, Lm = m.L, ov = m.over, run = m.run;
@@ -934,6 +1038,8 @@
   }
 
   document.addEventListener("click", (e) => {
+    const pm = e.target.closest("[data-pm]");
+    if (pm) { S.projMode = pm.dataset.pm; freshView(); viewProject(); window.scrollTo(0, 0); return; }
     const b = e.target.closest("[data-act]");
     if (!b) return;
     const a = b.dataset.act;
@@ -943,6 +1049,7 @@
     if (a === "sendRafter") sendRafter();
     if (a === "sendMap") sendMap();
     if (a === "sendEst") sendEst();
+    if (a === "printEst") printEst();
     if (a === "book") tg ? tg.openLink(CFG.BOOK_URL) : window.open(CFG.BOOK_URL);
     if (a === "author") tg ? tg.openTelegramLink("https://t.me/" + CFG.AUTHOR_CONTACT.replace("@", "")) : 0;
     if (a === "demo") { try { localStorage.setItem("demoPaid", S.paid ? "0" : "1"); } catch (_) {} checkAccess().then(render); }
@@ -950,7 +1057,12 @@
 
   /* ---------- навигация ---------- */
   const VIEWS = { project: viewProject, rafter: viewRafter, map: viewMap, book: viewBook, check: viewCheck, tips: viewTips };
+  function freshView() {           // новый контейнер — старые обработчики событий не копятся
+    const old = $("#view"), nw = old.cloneNode(false);
+    old.replaceWith(nw);
+  }
   function render() {
+    freshView();
     $("#projectName").textContent = P().name || "—";
     document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.tab));
     VIEWS[S.tab]();

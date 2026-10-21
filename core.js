@@ -99,7 +99,7 @@
     const hips = m(hipLenTotal);                                       // рёбра вальм, м
     const cov = COVER[material] || COVER.metal;
     const waste = hip ? 1.2 : 1.08;
-    const ceil = Math.ceil, r2 = (x) => Math.round(x * 100) / 100;
+    const ceil = Math.ceil, r2 = (x) => Math.round(x * 100) / 100, fr = (x) => String(r2(x)).replace(".", ",");
     const g = [];
     const add = (group, key, name, qty, unit, note = "") => {
       let grp = g.find((x) => x.group === group);
@@ -109,12 +109,12 @@
     // --- пиломатериал
     const counterLen = (area / m(step)) * 1.05;
     const battenLen = (area / m(cov.batten)) * 1.1;
-    add("Пиломатериал", "rafters", "Стропила (по карте раскроя)", rafters, "шт.", `${r2(m(rafterLenTotal))} пог. м`);
+    add("Пиломатериал", "rafters", "Стропила (по карте раскроя)", rafters, "шт.", `${fr(m(rafterLenTotal))} пог. м`);
     add("Пиломатериал", "counter", "Контробрешётка 50×50", ceil(counterLen / 3), "шт. по 3 м", `${Math.round(counterLen)} пог. м`);
     add("Пиломатериал", "batten", `Обрешётка ${cov.battenSec[0]}×${cov.battenSec[1]}`, ceil(battenLen / 6), "шт. по 6 м", `${Math.round(battenLen)} пог. м, шаг ${cov.batten} мм`);
-    add("Пиломатериал", "fascia", "Лобовая доска 25×150", ceil((eave + gableEdge) * 1.05 / 6), "шт. по 6 м", `${r2(eave + gableEdge)} пог. м`);
+    add("Пиломатериал", "fascia", "Лобовая доска 25×150", ceil((eave + gableEdge) * 1.05 / 6), "шт. по 6 м", `${fr(eave + gableEdge)} пог. м`);
     add("Пиломатериал", "wind", "Ветровые связи 25×100", hip ? 4 : 2 * ceil(m(L) / 6), "шт. по 6 м");
-    if (material === "soft") add("Пиломатериал", "osb", "OSB-3 12 мм, 1250×2500", ceil((area * 1.08) / 3.125), "листов", `${r2(area * 1.08)} м²`);
+    if (material === "soft") add("Пиломатериал", "osb", "OSB-3 12 мм, 1250×2500", ceil((area * 1.08) / 3.125), "листов", `${fr(area * 1.08)} м²`);
     // --- кровля и доборы
     if (material === "cpc" || material === "ceramic") {
       add("Кровля", "tiles", cov.name, ceil(area * 10.5 * (hip ? 1.12 : 1.05)), "шт.", "≈10 шт./м²");
@@ -147,7 +147,7 @@
     // --- водосток и снег
     const gutterRuns = hip ? 1 : 2;
     const pipes = Math.max(hip ? 4 : 2, ceil(eave / 10));
-    add("Водосток и снегозадержание", "gutter", "Желоб", ceil(eave / 3), "шт. по 3 м", `${r2(eave)} пог. м`);
+    add("Водосток и снегозадержание", "gutter", "Желоб", ceil(eave / 3), "шт. по 3 м", `${fr(eave)} пог. м`);
     add("Водосток и снегозадержание", "hooks", "Крюки желоба (длинные, до покрытия)", ceil(eave / 0.6) + gutterRuns * 2, "шт.", "шаг 600 мм");
     add("Водосток и снегозадержание", "funnel", "Воронки", pipes, "шт.");
     add("Водосток и снегозадержание", "pipe", "Водосточная труба", ceil((pipes * m(wallH) * 1.1) / 3), "шт. по 3 м", `${pipes} стояка по ${m(wallH)} м`);

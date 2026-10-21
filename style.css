@@ -151,3 +151,7 @@ table.est td.qty { white-space: nowrap; text-align: right; padding-right: 8px; }
 table.est td.pr { width: 78px; }
 table.est td.pr input { padding: 6px 8px; font-size: 14px; border-radius: 8px; }
 table.est td.sum { width: 64px; text-align: right; font-weight: 600; font-size: 13px; white-space: nowrap; }
+table.est td.cb { width: 30px; padding-right: 6px; }
+table.est td.cb input { width: 22px; height: 22px; accent-color: var(--ok); margin: 0; }
+table.est tr.bought td:nth-child(2) { color: var(--hint); text-decoration: line-through; }
+table.est tr.bought td.sum { color: var(--ok); }
