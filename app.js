@@ -272,12 +272,15 @@
     const e = estimateCalc(p);
     const prices = p.prices || {}, bought = p.bought || {};
     const q = (x) => (Number.isInteger(x) ? f0(x) : fmt(x, 2));
-    const rows = e.groups.map((g) => `<div class="card"><h3>${g.group}</h3><table class="parts est">
-      ${g.items.map((it) => `<tr data-row="${it.key}" class="${bought[it.key] ? "bought" : ""}"><td class="cb"><input type="checkbox" data-bought="${it.key}" ${bought[it.key] ? "checked" : ""} ${sample ? "disabled" : ""} aria-label="Куплено"></td><td>${it.name}${it.note ? `<small>${it.note}</small>` : ""}</td>
-        <td class="qty">${q(it.qty)}<small>${it.unit}</small></td>
-        <td class="pr"><input data-price="${it.key}" data-qty="${it.qty}" type="number" inputmode="decimal" placeholder="цена" value="${prices[it.key] ?? ""}" ${sample ? "disabled" : ""}></td>
-        <td class="sum" data-sum="${it.key}"></td></tr>`).join("")}
-      </table><div class="res"><span class="k">Итого по разделу</span><span class="v" data-gsum="${g.group}">—</span></div></div>`).join("");
+    const rows = e.groups.map((g) => `<div class="card"><h3>${g.group}</h3>
+      ${g.items.map((it) => `<div class="er${bought[it.key] ? " bought" : ""}" data-row="${it.key}">
+        <input class="er-cb" type="checkbox" data-bought="${it.key}" ${bought[it.key] ? "checked" : ""} ${sample ? "disabled" : ""} aria-label="Куплено">
+        <div class="er-name">${it.name}${it.note ? `<small>${it.note}</small>` : ""}</div>
+        <div class="er-qty"><b>${q(it.qty)}</b> ${it.unit}</div>
+        <label class="er-price"><input data-price="${it.key}" data-qty="${it.qty}" type="number" inputmode="decimal" placeholder="цена за ед." value="${prices[it.key] ?? ""}" ${sample ? "disabled" : ""}><span>₽</span></label>
+        <div class="er-sum" data-sum="${it.key}"></div>
+      </div>`).join("")}
+      <div class="res" style="margin-top:8px"><span class="k">Итого по разделу</span><span class="v" data-gsum="${g.group}">—</span></div></div>`).join("");
     setTimeout(updateEstTotals, 0);
     return `<div class="card"><div class="res">
         <span class="k">Площадь кровли по скатам</span><span class="v">${fmt(e.area, 1)} м²</span>
