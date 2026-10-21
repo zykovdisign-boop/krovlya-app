@@ -44,7 +44,7 @@
   const materialOf = (p) => MATERIALS.find((m) => m.k === p.material) || MATERIALS[2];
   const heightOf = (p) => num(p.height, (num(p.width, 8000) / 2) * Math.tan(rad(num(p.angle, 35))));
   const angleOf = (p) => (Math.atan(heightOf(p) / (num(p.width, 8000) / 2)) * 180) / Math.PI;
-  const S = { projects: [], cur: null, prog: {}, paid: false, tab: "project", openList: null };
+  const S = { projects: [], cur: null, prog: {}, paid: false, until: null, tab: "project", openList: null };
   const P = () => S.projects.find((p) => p.id === S.cur) || S.projects[0];
   let saveTimer;
   function save() {
@@ -63,16 +63,17 @@
     const r = await fetch(CFG.API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body });
     return r.json();
   }
+  const untilStr = () => new Date(S.until).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
   async function checkAccess() {
     if (!CFG.API_URL) {
       const q = new URLSearchParams(location.search).get("paid");
       let demo = null; try { demo = localStorage.getItem("demoPaid"); } catch (_) {}
       S.paid = q === "1" || demo === "1";
     } else {
-      try { const r = await api("access"); S.paid = !!r.paid; } catch (_) { /* оставляем как было */ }
+      try { const r = await api("access"); S.paid = !!r.paid; S.until = r.until || null; } catch (_) { /* оставляем как было */ }
     }
     const b = $("#accessBadge");
-    b.textContent = S.paid ? "полный доступ" : "бесплатно";
+    b.textContent = S.paid ? (S.until ? "доступ до " + untilStr() : "полный доступ") : "бесплатно";
     b.classList.toggle("paid", S.paid);
   }
 
@@ -467,7 +468,7 @@
         ${CFG.BOOK_URL ? `<button class="btn" data-act="book" type="button">Купить книгу</button>` : `<p class="note">Ссылка на покупку появится здесь.</p>`}
       </div>
       <div class="card"><h3>Доступ к приложению</h3>
-        <p>${S.paid ? "У вас полный доступ навсегда. Спасибо!" : "Бесплатно: проект, уклон и длина стропил, план сверху, первый чек-лист, часть советов. Полный доступ открывает разметку доски и кондуктор, карту раскроя, сечения, все чек-листы, советы и чертежи."}</p>
+        <p>${S.paid ? (S.until ? `Пробный полный доступ до ${untilStr()}. Если приложение пригодилось, расскажите, чего не хватает.` : "У вас полный доступ навсегда. Спасибо!") : "Бесплатно: проект, уклон и длина стропил, план сверху, первый чек-лист, часть советов. Полный доступ открывает разметку доски и кондуктор, карту раскроя, сечения, все чек-листы, советы и чертежи."}</p>
         ${S.paid ? "" : `<button class="btn" data-act="buy" type="button">Полный доступ за ${CFG.PRICE_STARS || 350} ⭐</button>
           <p class="note">Купили книгу? Введите код из письма:</p>
           <input id="code" type="text" placeholder="ROOF-XXXXXX или промокод" autocapitalize="characters">
@@ -1012,7 +1013,7 @@
     if (!CFG.API_URL) return toast("Коды работают после подключения бота");
     try {
       const r = await api("redeem", { code: code.trim().toUpperCase() });
-      if (r.paid) { await checkAccess(); toast("Код принят, доступ открыт"); render(); }
+      if (r.paid) { await checkAccess(); toast(S.until ? "Код принят, доступ до " + untilStr() : "Код принят, доступ открыт"); render(); }
       else toast(r.error || "Код не подошёл");
     } catch (_) { toast("Не удалось проверить код"); }
   }
