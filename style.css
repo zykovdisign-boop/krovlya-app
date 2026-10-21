@@ -108,3 +108,11 @@ svg.bp { display: block; width: 100%; height: auto; }
 .bp-tag.info rect { fill: none; stroke: rgba(255, 255, 255, .6); stroke-dasharray: 3 2; }
 .bp-hint { margin: 0; padding: 0 14px 10px; color: rgba(255, 255, 255, .85); font-size: 12px; text-align: right; }
 svg.board { background: #fff; border-radius: 10px; }
+
+/* полноэкранный просмотр чертежа */
+.zoom { position: fixed; inset: 0; z-index: 40; background: #fff; display: flex; flex-direction: column; }
+.zoom-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #e5e2db; font-size: 13px; color: #6f6c66; }
+.zoom-bar button { border: 0; background: var(--btn); color: var(--btn-text); border-radius: 10px; padding: 8px 14px; font: inherit; font-weight: 600; }
+.zoom-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 10px; }
+.zoom-body svg.zoomed { width: 1500px; height: auto; display: block; }
+svg.board { cursor: zoom-in; }

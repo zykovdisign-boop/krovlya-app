@@ -128,30 +128,65 @@
   }
 
   /* ---------- вкладка: стропила ---------- */
-  // буквы на схеме: какое поле проекта правит каждая
+  const rad = (d) => (d * Math.PI) / 180;
+  // буквы на схеме: какое поле проекта правит каждая. Уклон можно задать углом Q или высотой H.
   const LETTERS = {
     A: { k: "h", t: "A — высота доски", u: "мм" },
-    Q: { k: "angle", t: "Q — уклон", u: "°" },
+    Q: { k: "angle", t: "Q — уклон. Высота конька H пересчитается сама", u: "°" },
+    H: { k: "angle", t: "H — высота конька над мауэрлатом. Уклон Q пересчитается сам", u: "мм",
+      get: (p) => Math.round((num(p.width, 8000) / 2) * Math.tan(rad(num(p.angle, 35)))),
+      set: (v, p) => Math.round(((Math.atan(v / (num(p.width, 8000) / 2)) * 180) / Math.PI) * 10) / 10 },
     C: { k: "width", t: "C — заложение: от наружной грани мауэрлата до оси конька", u: "мм", get: (p) => num(p.width, 8000) / 2, set: (v) => v * 2 },
     D: { k: "over", t: "D — свес по горизонтали", u: "мм" },
-    d: { k: "d", t: "d — глубина запила (пусто — четверть доски)", u: "мм", allowEmpty: true },
+    d: { k: "d", t: "d — глубина опорного запила (пусто — четверть доски)", u: "мм", allowEmpty: true },
     M: { k: "plate", t: "M — ширина мауэрлата", u: "мм" },
   };
+  const RIDGES = [["butt", "Встык"], ["beam", "На прогон"]];
+
   function viewRafter() {
     const v = $("#view");
+    const p = P();
     v.innerHTML = `<h2>Стропила</h2>
-      <div class="card bp-card"><div id="bp"></div><p class="bp-hint">Нажмите на букву, чтобы ввести размер</p></div>
+      <div class="card bp-card"><div id="bp"></div><p class="bp-hint">Нажмите на букву, чтобы ввести размер. Уклон задаётся буквой Q или H.</p></div>
+      <div class="card"><h3>Соединение в коньке</h3>
+        <div class="seg" id="ridgeSeg">${RIDGES.map(([k, t]) => `<button type="button" data-ridge="${k}" class="${(p.ridge || "butt") === k ? "on" : ""}">${t}</button>`).join("")}</div>
+        <div id="ridgeFields" class="grid" style="margin-top:10px;${(p.ridge || "butt") === "beam" ? "" : "display:none"}">
+          ${field("beamW", "Ширина прогона, мм", { ph: "150" })}
+          ${field("dr", "Запил в коньке, мм", { ph: "авто" })}
+        </div>
+        <p class="note" id="ridgeNote"></p>
+      </div>
       <div id="out"></div>
       <div class="card"><h3>Дом и шаг</h3><div class="grid">
         ${field("length", "Длина дома, мм")}
         ${field("step", "Шаг стропил, мм")}
-      </div></div>`;
+      </div></div>
+      <div class="card"><h3>Сращивание доски</h3><p class="sub">Рекомендация автора: косой замок с двумя упорами. Нажмите на чертёж, чтобы увеличить</p><div id="splice"></div>
+        <p class="note">Стык располагают над опорой или рядом с ней. Крепёж — два шурупа или болта навстречу друг другу, через упоры, как показано стрелками.</p></div>`;
     bindFields(v, rafterOut);
     v.addEventListener("click", (e) => {
       const t = e.target.closest("[data-letter]");
-      if (t) editLetter(t.dataset.letter);
+      if (t) return editLetter(t.dataset.letter);
+      const z = e.target.closest("svg.board");
+      if (z) return openZoom(z.outerHTML);
+      const rb = e.target.closest("[data-ridge]");
+      if (rb) {
+        P().ridge = rb.dataset.ridge; save();
+        v.querySelectorAll("[data-ridge]").forEach((b) => b.classList.toggle("on", b === rb));
+        $("#ridgeFields").style.display = rb.dataset.ridge === "beam" ? "" : "none";
+        rafterOut(); haptic();
+      }
     });
     rafterOut();
+  }
+  function openZoom(svg) {
+    const bg = document.createElement("div");
+    bg.className = "zoom";
+    bg.innerHTML = `<div class="zoom-bar"><span>Прокрутите в сторону · удобнее держать телефон горизонтально</span><button type="button" data-close>Закрыть</button></div>
+      <div class="zoom-body">${svg.replace('class="draw board"', 'class="zoomed"')}</div>`;
+    document.body.appendChild(bg);
+    if (tg && tg.BackButton) { tg.BackButton.show(); tg.BackButton.onClick(function cl() { bg.remove(); tg.BackButton.hide(); tg.BackButton.offClick(cl); }); }
+    bg.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) { bg.remove(); if (tg && tg.BackButton) tg.BackButton.hide(); } });
   }
   function editLetter(L) {
     const def = LETTERS[L];
@@ -169,7 +204,7 @@
     const done = () => {
       const raw = inp.value.replace(",", ".").trim();
       if (raw === "" && def.allowEmpty) p[def.k] = "";
-      else if (raw !== "" && !isNaN(raw) && Number(raw) > 0) p[def.k] = def.set ? def.set(Number(raw)) : Number(raw);
+      else if (raw !== "" && !isNaN(raw) && Number(raw) > 0) p[def.k] = def.set ? def.set(Number(raw), p) : Number(raw);
       save(); bg.remove(); rafterOut(); haptic();
     };
     bg.addEventListener("click", (e) => {
@@ -178,43 +213,50 @@
     });
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") done(); });
   }
-  function rafterCalc() {
-    const p = P();
+  function rafterCalc(sample = false) {
+    const p = sample ? { width: 8000, angle: 35, over: 500, h: 200, d: "", plate: 150, ridge: P().ridge, beamW: 150, dr: "", length: 10000, step: 600 } : P();
     const run = num(p.width, 8000) / 2;
     const r = C.rafter({ run, angle: num(p.angle, 35), over: num(p.over, 0), h: num(p.h, 200),
       d: p.d === "" ? null : num(p.d, null), plate: num(p.plate, 150) });
+    const ridge = C.ridgeEnd({ run, angle: r.angle, h: r.h, type: p.ridge || "butt", beamW: num(p.beamW, 150), dr: p.dr === "" ? null : num(p.dr, null) });
+    const xmin = -r.lenOver, xmax = Math.max(...ridge.pts.map((q) => q[0]));
+    const gab = xmax - xmin;
+    const board = C.BOARDS.find((b) => b >= gab + 50) || null;
     const sp = C.spacing({ length: num(p.length, 10000), step: num(p.step, 600) });
-    return { p, r, sp, run };
+    return { p, r, ridge, gab, board, sp, run };
   }
   function rafterOut() {
-    const { p, r, sp, run } = rafterCalc();
+    const { p, r, ridge, gab, board, sp, run } = rafterCalc();
     $("#bp").innerHTML = blueprintSvg(r, run);
+    $("#splice").innerHTML = spliceSvg(r.h);
+    $("#ridgeNote").textContent = ridge.type === "beam"
+      ? "Стропило опирается на коньковый прогон: нижний упор в грань прогона, площадка на прогоне, верхний рез по оси конька — встык с парным стропилом."
+      : "Пара стропил сходится на оси конька резами по отвесу. Стык закрывают накладками с двух сторон или пластинами.";
     const sl = C.slope({ angle: r.angle });
     let html = `<div class="card"><h3>Длина стропила</h3><div class="res">
         <span class="k">Уклон</span><span class="v">${fmt(r.angle, 1)}° · ${fmt(sl.percent)} %</span>
         <span class="k">H — высота конька над мауэрлатом</span><span class="v">${mm(r.rise)}</span>
-        <hr><span class="k">По нижней кромке со свесом</span><span class="v big">${mm(r.lenBottom)}</span>
-        <span class="k">Габарит доски с резами</span><span class="v">${mm(r.boardLen)}</span>
-        <span class="k">Брать доску</span><span class="v">${r.board ? m(r.board) : "сращивать"}</span>
+        <hr><span class="k">Габарит доски с резами</span><span class="v big">${mm(gab)}</span>
+        <span class="k">Брать доску</span><span class="v">${board ? m(board) : "сращивать"}</span>
         <hr><span class="k">Стропильных пар</span><span class="v">${sp.pairs} (${sp.rafters} шт.)</span>
         <span class="k">Фактический шаг</span><span class="v">${mm(sp.step)}</span>
       </div>
       <button class="btn ghost" data-act="sendRafter" type="button">Отправить расчёт в чат</button></div>`;
 
-    const rn = S.paid ? r : C.rafter({ run: 4000, angle: 35, over: 500, h: 200 });   // под замком — пример из книги
-    const sinA = Math.sin((rn.angle * Math.PI) / 180);
-    const layout = `<h3>Разметка доски</h3>${boardSvg(rn)}
+    const smp = S.paid ? { r, ridge } : rafterCalc(true);     // под замком — пример из книги
+    const rr = smp.r, rg = smp.ridge;
+    const warns = rr.warnings.concat(rg.warnings);
+    const layout = `<h3>Разметка доски</h3><p class="sub">Нажмите на чертёж, чтобы увеличить</p>${boardSvg(rr, rg)}
       <div class="res">
-        <span class="k">От торца свеса до запила (по нижней кромке)</span><span class="v">${mm(rn.lenOver)}</span>
-        <span class="k">От запила до конькового реза</span><span class="v">${mm(rn.lenRidge)}</span>
-        <span class="k">Угол торцевых резов к кромке</span><span class="v">${fmt(rn.plumbAngleToEdge, 1)}°</span>
-        <span class="k">Запил: глубина / по кромке</span><span class="v">${mm(rn.d)} / ${mm(rn.d / sinA)}</span>
-        <span class="k">Площадка на мауэрлате</span><span class="v">${mm(rn.seat)}</span>
+        <span class="k">От торца свеса до запила (по низу)</span><span class="v">${mm(rr.lenOver)}</span>
+        <span class="k">Угол торцевых резов к кромке</span><span class="v">${fmt(rr.plumbAngleToEdge, 1)}°</span>
+        <span class="k">Опорный запил: глубина / площадка</span><span class="v">${mm(rr.d)} / ${mm(rr.seat)}</span>
+        ${rg.type === "beam" ? `<span class="k">Запил в коньке: упор / площадка</span><span class="v">${mm(rg.lowerFace)} / ${mm(rg.seat)}</span>` : ""}
       </div>
-      ${rn.warnings.map((w) => `<div class="warn">${w}</div>`).join("")}
+      ${warns.map((w) => `<div class="warn">${w}</div>`).join("")}
       <button class="btn" data-act="jig" type="button">Кондуктор 1:1 для печати (PDF)</button>
       <p class="note">Шаблон печатается на листах A4 в натуральную величину. На последнем листе контрольный квадрат 50 мм: проверьте его линейкой, прежде чем вырезать.</p>`;
-    html += `<div class="card">${S.paid ? layout : `<div class="locked-body">${layout}</div>${lockHtml("Разметка и кондуктор", "Развёртка доски со всеми размерами, запил в увеличении и шаблон для печати 1:1.")}`}</div>`;
+    html += `<div class="card">${S.paid ? layout : `<div class="locked-body">${layout}</div>${lockHtml("Разметка и кондуктор", "Развёртка доски со всеми размерами, запилы на мауэрлате и в коньке, шаблон для печати 1:1.")}`}</div>`;
 
     if (p.form === "hip") {
       const hp = S.paid ? C.hip({ run, angle: r.angle, over: num(p.over, 0), step: sp.step }) : C.hip({ run: 4000, angle: 35, over: 500, step: 588 });
@@ -232,48 +274,62 @@
   }
 
   /* --- общие примитивы чертежей --- */
-  const WH = "#ffffff", WD = "rgba(255,255,255,.55)", INKC = "#1d1d1b";
+  const WH = "#ffffff", WD = "rgba(255,255,255,.55)", INKC = "#1d1d1b", RED = "#e0262b", BLUE = "#1a9be0";
   const f0 = (v) => Math.round(v).toLocaleString("ru-RU");
   function ln(x1, y1, x2, y2, w = 1.4, c = WH, dash = "") {
     return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${c}" stroke-width="${w}"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`;
   }
-  function tick(x, y, c = WH, len = 5) {             // засечка размерной линии под 45°
+  function tick(x, y, c = WH, len = 5) {
     return ln(x - len * 0.7, y + len * 0.7, x + len * 0.7, y - len * 0.7, 1.2, c);
   }
   function dimLine(x1, y1, x2, y2, c = WH) {
     return ln(x1, y1, x2, y2, 1, c) + tick(x1, y1, c) + tick(x2, y2, c);
   }
-  function txt(x, y, s, anchor = "middle", size = 11.5, fill = INKC, w = 600) {
-    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${size}" font-weight="${w}" text-anchor="${anchor}" fill="${fill}">${s}</text>`;
-  }
-  function tag(x, y, L, val, anchor = "middle", info = false) {   // буква-кнопка со значением
+  function tag(x, y, L, val, anchor = "middle") {
     const label = `${L} ${val}`;
     const wPx = 12 + label.length * 7;
     const x0 = anchor === "middle" ? x - wPx / 2 : anchor === "end" ? x - wPx : x;
-    return `<g class="bp-tag${info ? " info" : ""}" ${info ? "" : `data-letter="${L}"`}>
+    return `<g class="bp-tag" data-letter="${L}">
       <rect x="${x0.toFixed(1)}" y="${(y - 13).toFixed(1)}" width="${wPx.toFixed(1)}" height="19" rx="9.5"/>
       <text x="${(x0 + wPx / 2).toFixed(1)}" y="${(y + 1).toFixed(1)}" text-anchor="middle">${label}</text></g>`;
+  }
+  /* размер-стрелка в стиле чертежей автора: линия со стрелками на концах и числом вдоль неё */
+  function arrowDim(p1, p2, label, off = 0, opt = {}) {
+    const dx = p2[0] - p1[0], dy = p2[1] - p1[1], L = Math.hypot(dx, dy) || 1;
+    const ux = dx / L, uy = dy / L, nx = -uy * off, ny = ux * off;
+    const a = [p1[0] + nx, p1[1] + ny], b = [p2[0] + nx, p2[1] + ny];
+    const hs = opt.head || 14, hw = hs * 0.42;
+    const head = (q, sx, sy) => `<polygon points="${q[0]},${q[1]} ${(q[0] - sx * hs - sy * hw).toFixed(1)},${(q[1] - sy * hs + sx * hw).toFixed(1)} ${(q[0] - sx * hs + sy * hw).toFixed(1)},${(q[1] - sy * hs - sx * hw).toFixed(1)}" fill="${INKC}"/>`;
+    let ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+    if (ang > 90) ang -= 180;
+    if (ang < -90) ang += 180;
+    const fs = opt.fs || 26;
+    const sg = off === 0 ? -1 : Math.sign(off);
+    const lo = opt.labelOff == null ? fs * 0.75 : opt.labelOff;
+    const nnx = -uy, nny = ux;                              // единичная нормаль
+    const tx = (a[0] + b[0]) / 2 + nnx * sg * lo, ty = (a[1] + b[1]) / 2 + nny * sg * lo + fs * 0.35;
+    const ext = opt.ext === false ? "" : (Math.abs(off) > 2 ? ln(p1[0], p1[1], a[0] + nx * 0.15, a[1] + ny * 0.15, 0.8, "#999") + ln(p2[0], p2[1], b[0] + nx * 0.15, b[1] + ny * 0.15, 0.8, "#999") : "");
+    return `${ext}<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${INKC}" stroke-width="2.4"/>
+      ${head(a, -ux, -uy)}${head(b, ux, uy)}
+      <text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" font-size="${fs}" text-anchor="middle" fill="${INKC}" paint-order="stroke" stroke="#fff" stroke-width="6" transform="rotate(${ang.toFixed(1)} ${tx.toFixed(1)} ${(ty - fs * 0.35).toFixed(1)})">${label}</text>`;
   }
 
   /* --- схема-синька: узел стропила с буквами-размерами (схематично, не в масштабе) --- */
   function blueprintSvg(r, run) {
-    const A = (25 * Math.PI) / 180, t = Math.tan(A), sn = Math.sin(A), cs = Math.cos(A);
-    const P = [80, 168], th = 24;                        // угол мауэрлата, высота доски на схеме
-    const yb = (x) => P[1] - (x - P[0]) * t;            // нижняя кромка стропила
-    const xe = 24, xr = 300;                             // торец свеса, ось конька
-    const dS = 13;                                       // глубина запила на схеме
+    const A = rad(25), t = Math.tan(A), sn = Math.sin(A), cs = Math.cos(A);
+    const P = [80, 168], th = 24;
+    const xe = 24, xr = 300;
+    const dS = 13;
     const V = [P[0], P[1] + dS], Hn = [P[0] + dS / t, P[1]];
-    // нижняя кромка проходит через V; торцы — по отвесу
     const yb2 = (x) => V[1] - (x - V[0]) * t;
     const eb = [xe, yb2(xe)], rb = [xr, yb2(xr)];
     const etop = [xe, yb2(xe) - th / cs], rtop = [xr, yb2(xr) - th / cs];
     const rafter = `M${eb[0]},${eb[1].toFixed(1)} L${V[0]},${V[1]} L${P[0]},${P[1]} L${Hn[0].toFixed(1)},${Hn[1]} L${rb[0]},${rb[1].toFixed(1)} L${rtop[0]},${rtop[1].toFixed(1)} L${etop[0]},${etop[1].toFixed(1)} Z`;
-    // мауэрлат со штриховкой
     const pw = 40, ph = 44;
     let hatch = "";
     for (let i = -ph; i < pw; i += 9) {
-      const x1 = Math.max(0, i), y1 = Math.max(0, -i) ;
-      const x2 = Math.min(pw, i + ph), y2 = Math.min(ph, pw - i);
+      const x1 = Math.max(0, i), y1 = Math.max(0, -i);
+      const x2 = Math.min(pw, i + ph);
       hatch += ln(P[0] + x1, P[1] + ph - y1, P[0] + x2, P[1] + ph - (x2 - i), 0.8, WD);
     }
     const plate = `<rect x="${P[0]}" y="${P[1]}" width="${pw}" height="${ph}" fill="none" stroke="${WH}" stroke-width="1.6"/>${hatch}`;
@@ -294,7 +350,7 @@
       ${dimLine(mb[0], mb[1], mt[0], mt[1])}
       ${tag((xe + P[0]) / 2 + 4, yBase + 20, "D", f0(r.over))}
       ${tag((P[0] + xr) / 2, yBase + 20, "C", f0(run))}
-      ${tag(330, (P[1] + rb[1]) / 2 + 4, "H", f0(r.rise), "end", true)}
+      ${tag(330, (P[1] + rb[1]) / 2 + 4, "H", f0(r.rise), "end")}
       ${tag(mt[0] - 6, mt[1] - 10, "A", f0(r.h))}
       ${tag(P[0] + arcR + 44, P[1] + 18, "Q", `${fmt(r.angle, 1)}°`)}
       ${tag(P[0] - 6, P[1] + 40, "d", f0(r.d), "end")}${ln(P[0] - 8, P[1] + 30, P[0] - 1, P[1] + dS / 2 + 1, 0.8, WH)}
@@ -302,50 +358,100 @@
     </svg>`;
   }
 
-  /* --- развёртка доски для разметки + выносной круг запила --- */
-  function boardSvg(r) {
-    const a = (r.angle * Math.PI) / 180, s = Math.sin(a), c = Math.cos(a), t = Math.tan(a);
-    const shift = r.h * t;                               // сдвиг верхней кромки на торцах, мм
-    const total = r.lenOver + r.lenRidge + shift;
-    const X0 = 20, X1 = 340, k = (X1 - X0) / total;     // масштаб по длине (по высоте схематично)
-    const yB = 156, th = 40;
-    const off = shift * k;
-    const xE = X0, xV = X0 + r.lenOver * k, xR = xV + r.lenRidge * k;
-    const nS = Math.max(7, (r.d / s) * k);
-    const board = `M${xE},${yB} L${xV.toFixed(1)},${yB} L${(xV + nS * 0.3).toFixed(1)},${yB - 8} L${(xV + nS).toFixed(1)},${yB} L${xR.toFixed(1)},${yB} L${(xR + off).toFixed(1)},${yB - th} L${(xE + off).toFixed(1)},${yB - th} Z`;
-    // выносной круг: запил в реальных пропорциях
-    const cx = 252, cy = 240, R = 48;
-    const span = r.d / s;
-    const kk = (R * 1.2) / Math.max(span, 1);
-    const nW = span * kk, pX = r.d * s * kk, pY = r.d * c * kk;
-    const bx = cx - nW / 2, by = cy + 8;
-    const D = INKC;
-    const detail = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="#fff" stroke="${D}" stroke-width="1.2"/>
-      <polyline points="${cx - R + 5},${by} ${bx.toFixed(1)},${by} ${(bx + pX).toFixed(1)},${(by - pY).toFixed(1)} ${(bx + nW).toFixed(1)},${by} ${cx + R - 5},${by}" fill="none" stroke="${D}" stroke-width="1.8"/>
-      ${dimLine(bx, by + 12, bx + nW, by + 12, D)}${ln(bx, by, bx, by + 15, 0.6, D)}${ln(bx + nW, by, bx + nW, by + 15, 0.6, D)}
-      ${ln(bx - 5 * c, by - 5 * s, bx + pX - 5 * c, by - pY - 5 * s, 0.9, D)}${tick(bx - 5 * c, by - 5 * s, D, 4)}${tick(bx + pX - 5 * c, by - pY - 5 * s, D, 4)}`;
-    const fa = fmt(r.plumbAngleToEdge, 0);
-    return `<svg class="draw board" viewBox="0 0 360 296" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
-      <path d="${board}" fill="#f1e2c8" stroke="${D}" stroke-width="1.6" stroke-linejoin="round"/>
-      ${ln(xE, yB - th - 2, xE, 34, 0.6, D)}${ln(xE + off, yB - th, xE + off, 34, 0.6, D)}${ln(xR + off, yB - th, xR + off, 34, 0.6, D)}
-      ${dimLine(xE, 40, xE + off, 40, D)}${dimLine(xE + off, 40, xR + off, 40, D)}
-      ${txt(xE + off / 2 + 2, 30, f0(shift), "start", 12)}${txt((xE + off + xR + off) / 2, 30, `${f0(r.lenBottom)} по кромке`, "middle", 13.5, INKC, 700)}
-      ${ln(xV, yB - 10, xV, 64, 0.6, D)}
-      ${dimLine(xE + off, 70, xV, 70, D)}${dimLine(xV, 70, xR + off, 70, D)}
-      ${txt((xE + off + xV) / 2, 62, f0(r.lenOver - shift), "middle", 12)}${txt((xV + xR + off) / 2, 62, f0(r.lenRidge + shift), "middle", 13.5)}
-      ${ln(xE, yB, xE, 182, 0.6, D)}${ln(xV, yB, xV, 182, 0.6, D)}${dimLine(xE, 178, xV, 178, D)}
-      ${txt((xE + xV) / 2, 196, f0(r.lenOver), "middle", 13)}
-      <path d="M${(xR + off - 20).toFixed(1)},${yB - th} A20,20 0 0 1 ${(xR + off - 20 * Math.sin(a) * 0.9).toFixed(1)},${(yB - th + 20 * Math.cos(a) * 0.9).toFixed(1)}" fill="none" stroke="${D}" stroke-width="0.9"/>
-      ${txt(xR - 14, yB - th + 22, `${fa}°`, "end", 13)}
-      <path d="M${(xE + off + 20).toFixed(1)},${yB - th} A20,20 0 0 0 ${(xE + off + 20 * Math.sin(a) * 0.9 - 6).toFixed(1)},${(yB - th + 18).toFixed(1)}" fill="none" stroke="${D}" stroke-width="0.9"/>
-      <circle cx="${(xV + nS / 2).toFixed(1)}" cy="${yB - 3}" r="11" fill="none" stroke="${D}" stroke-width="1"/>
-      ${ln(xV + nS / 2 + 7, yB + 6, cx - R * 0.72, cy - R * 0.7, 0.8, D)}
-      ${detail}
-      ${txt(cx - R + 10, cy - R / 2 + 4, `d ${f0(r.d)}`, "start", 12.5)}${txt(cx, by + 31, f0(span), "middle", 12.5)}
-      ${txt(X0, 240, "Торцы режутся по отвесу:", "start", 11.5, "#6f6c66", 400)}
-      ${txt(X0, 255, `угол ${fa}° к кромке доски.`, "start", 11.5, "#6f6c66", 400)}
-      ${txt(X0, 276, "Размеры по нижней кромке —", "start", 11.5, "#6f6c66", 400)}
-      ${txt(X0, 291, "той, где запил.", "start", 11.5, "#6f6c66", 400)}
+  /* --- развёртка доски в стиле чертежей автора: красный контур, голубой габарит, чёрные размеры --- */
+  function boardSvg(r, ridge) {
+    const a = rad(r.angle), s = Math.sin(a), c = Math.cos(a), t = Math.tan(a);
+    const h = r.h, d = r.d;
+    const E0 = [-r.lenOver, 0], E1 = [-r.lenOver + h * t, h];
+    const V = [0, 0], Pn = [d * s, d * c], Hn = [d / s, 0];
+    const RP = ridge.pts;
+    const xmin = E0[0], xmax = Math.max(...RP.map((q) => q[0]));
+    // по краям — истинный масштаб (углы честные), середина доски сжата
+    const W = 1000, M = 34;
+    const xA = Math.max(Hn[0], h * t) + 0.5 * h, xB = Math.min(...RP.map((q) => q[0])) - 0.7 * h;
+    const leftMM = xA - xmin, rightMM = xmax - xB;
+    let k = 150 / h;
+    const avail = W - 2 * M - 170;
+    if ((leftMM + rightMM) * k > avail) k = avail / (leftMM + rightMM);
+    const midPx = W - 2 * M - (leftMM + rightMM) * k;
+    const X = (x) => (x <= xA ? M + (x - xmin) * k : x >= xB ? M + leftMM * k + midPx + (x - xB) * k : M + leftMM * k + ((x - xA) / (xB - xA)) * midPx);
+    const top = 100, yb = top + h * k;
+    const Y = (y) => yb - y * k;
+    const S2 = (q) => [X(q[0]), Y(q[1])];
+    const outline = [E0, V, Pn, Hn, ...RP, E1].map(S2).map((q) => q.map((v) => v.toFixed(1)).join(",")).join(" ");
+    const plTop = [h * t, h];
+    const ang = fmt(90 - r.angle, 0);
+    const arcAt = (q, a1, a2, R = 46) => {
+      const [x, y] = S2(q);
+      const p1 = [x + R * Math.cos(a1), y - R * Math.sin(a1)], p2 = [x + R * Math.cos(a2), y - R * Math.sin(a2)];
+      return `<path d="M${p1[0].toFixed(1)},${p1[1].toFixed(1)} A${R},${R} 0 0 ${a2 > a1 ? 0 : 1} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}" fill="none" stroke="${INKC}" stroke-width="2"/>`;
+    };
+    const lastTop = RP[RP.length - 1];
+    let ridgeDims = "";
+    if (ridge.type === "beam") {
+      const [B0, B1, B2, B3] = RP;
+      const foot = [B0[0] + ridge.foot, 0];
+      ridgeDims = arrowDim(S2(B0), S2(B1), f0(ridge.lowerFace), -22, { side: -1, fs: 22, head: 11 })
+        + arrowDim(S2(B1), S2(B2), f0(ridge.seat), -16, { side: -1, fs: 22, head: 11 })
+        + arrowDim(S2(foot), S2(B3), f0(ridge.full), 34, { side: 1, fs: 24 })
+        + arrowDim(S2(B0), S2(foot), f0(ridge.foot), 26, { side: 1, fs: 20, head: 10 })
+        + `<line x1="${X(foot[0]).toFixed(1)}" y1="${Y(0).toFixed(1)}" x2="${X(B2[0]).toFixed(1)}" y2="${Y(B2[1]).toFixed(1)}" stroke="${BLUE}" stroke-width="2" stroke-dasharray="5 6"/>`;
+    } else {
+      ridgeDims = arrowDim(S2(RP[0]), S2(RP[1]), f0(ridge.full), 34, { side: 1, fs: 24 });
+    }
+    return `<svg class="draw board" viewBox="0 0 ${W} ${yb + 160}" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
+      <rect x="${X(xmin)}" y="${Y(h)}" width="${(X(xmax) - X(xmin)).toFixed(1)}" height="${(h * k).toFixed(1)}" fill="none" stroke="${BLUE}" stroke-width="2" stroke-dasharray="4 6"/>
+      <line x1="${X(Pn[0]).toFixed(1)}" y1="${Y(Pn[1]).toFixed(1)}" x2="${X(plTop[0]).toFixed(1)}" y2="${Y(h).toFixed(1)}" stroke="${BLUE}" stroke-width="2" stroke-dasharray="4 6"/>
+      <polygon points="${outline}" fill="#fff" fill-opacity=".001" stroke="${RED}" stroke-width="3" stroke-linejoin="miter"/>
+      ${arcAt(E0, 0, a > 0 ? Math.PI / 2 - a : 0)}
+      ${arcAt(lastTop, Math.PI, Math.PI + (Math.PI / 2 - a))}
+      <text x="${(X(E0[0]) + 70).toFixed(1)}" y="${(Y(0) - 22).toFixed(1)}" font-size="24" fill="${INKC}">${ang}°</text>
+      <text x="${(X(lastTop[0]) - 74).toFixed(1)}" y="${(Y(h) + 44).toFixed(1)}" font-size="24" fill="${INKC}" text-anchor="end">${ang}°</text>
+      ${arrowDim(S2([xmin, h]), S2(E1), f0(h * t), -30, { side: -1, fs: 20, head: 10 })}
+      ${arrowDim(S2(E1), S2(plTop), f0(r.lenOver), -30, { side: -1 })}
+      ${arrowDim(S2([E1[0] - 6 * c / k, E1[1]]), S2(V), f0(Math.hypot(E1[0], E1[1])), 0, { side: -1, ext: false })}
+      ${arrowDim(S2(V), S2(Pn), f0(d), -22, { side: -1, fs: 22, head: 11 })}
+      ${arrowDim(S2(Pn), S2(Hn), f0(r.seat), -18, { side: -1, fs: 22, head: 11 })}
+      ${arrowDim(S2(E0), S2(V), f0(r.lenOver), 40, { side: 1 })}
+      ${arrowDim(S2(V), S2(Hn), f0(d / s), 40, { side: 1, fs: 22 })}
+      ${arrowDim(S2(Hn), S2(RP[0]), f0(RP[0][0] - Hn[0]), 40, { side: 1 })}
+      ${arrowDim(S2([xmin, 0]), S2([xmax, 0]), `доска ${f0(xmax - xmin)}`, 100, { side: 1, fs: 28 })}
+      ${ridgeDims}
+    </svg>`;
+  }
+
+  /* --- сращивание доски: косой замок с упорами (узел автора). Размеры 80/30/20/300 для доски от 180 мм --- */
+  function spliceSvg(h) {
+    const big = h >= 180;
+    const lo = big ? 80 : Math.round(h * 0.4), step = big ? 20 : Math.round(h * 0.1), shelf = 30, L = big ? 300 : Math.round(h * 1.5);
+    const k = 1.35, M = 40, top = 70;
+    const x0 = 330;                                      // начало замка, мм от левого края картинки
+    const X = (x) => M + x * k, Y = (y) => top + (h - y) * k;
+    const total = x0 * 2 + shelf * 2 + L;
+    const xA = x0, xB = x0 + shelf, xC = xB + L, xD = xC + shelf;
+    const joint = [[xA, 0], [xA, lo], [xB, lo], [xB, lo - step], [xC, h - lo + step], [xC, h - lo], [xD, h - lo], [xD, h]];
+    const pts = (arr) => arr.map((q) => `${X(q[0]).toFixed(1)},${Y(q[1]).toFixed(1)}`).join(" ");
+    const blue = [[0, 0], ...joint, [0, h]];
+    const red = [...joint, [total, h], [total, 0]];
+    const H2 = Y(0) + 90;
+    const dash = (p1, p2) => {
+      const dx = p2[0] - p1[0], dy = p2[1] - p1[1], L2 = Math.hypot(dx, dy), ux = dx / L2, uy = dy / L2;
+      return `<line x1="${p1[0]}" y1="${p1[1]}" x2="${p2[0] - ux * 18}" y2="${p2[1] - uy * 18}" stroke="${INKC}" stroke-width="4" stroke-dasharray="12 8"/>
+        <polygon points="${p2[0]},${p2[1]} ${p2[0] - ux * 26 - uy * 11},${p2[1] - uy * 26 + ux * 11} ${p2[0] - ux * 26 + uy * 11},${p2[1] - uy * 26 - ux * 11}" fill="${INKC}"/>`;
+    };
+    const sl = (y) => (y - (lo - step)) / (h - 2 * lo + 2 * step);
+    const onSlant = (fr) => [X(xB + L * fr), Y(lo - step + (h - 2 * lo + 2 * step) * fr)];
+    const s1 = onSlant(0.12), s2 = onSlant(0.85);
+    return `<svg class="draw board" viewBox="0 0 ${M * 2 + total * k} ${H2 + 10}" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
+      <polygon points="${pts(blue)}" fill="#fff" fill-opacity=".001" stroke="${BLUE}" stroke-width="3"/>
+      <polygon points="${pts(red)}" fill="#fff" fill-opacity=".001" stroke="${RED}" stroke-width="3"/>
+      ${dash([s1[0] - 60, top - 60], [s1[0] + 4, s1[1] - 6])}
+      ${dash([s2[0] + 50, Y(0) + 60], [s2[0] - 4, s2[1] + 8])}
+      ${arrowDim([X(xA), Y(0)], [X(xA), Y(lo)], `${lo} мм`, -34, { fs: 34, head: 16 })}
+      ${arrowDim([X(xA), Y(lo)], [X(xB), Y(lo)], `${shelf}`, -24, { fs: 32, head: 12 })}
+      ${arrowDim([X(xB), Y(lo)], [X(xB), Y(lo - step)], `${step}`, -22, { fs: 32, head: 10 })}
+      ${arrowDim([X(xB), Y(lo - step)], [X(xC), Y(h - lo + step)], `${L} мм`, 28, { fs: 34, head: 16 })}
+      <text x="${X(total / 2)}" y="${H2}" font-size="30" text-anchor="middle" fill="#6f6c66">доска ${h} мм${big ? "" : " (размеры пересчитаны от высоты доски)"}</text>
     </svg>`;
   }
 
@@ -570,11 +676,12 @@
     } catch (_) { toast("Не удалось проверить код"); }
   }
   async function sendRafter() {
-    const { p, r, sp } = rafterCalc();
+    const { p, r, sp, ridge, gab, board } = rafterCalc();
     const text = `Стропила · ${p.name}\nШирина ${fmt(p.width)} мм, уклон ${fmt(r.angle, 1)}°, свес ${fmt(p.over)} мм\n` +
-      `Высота конька: ${fmt(r.rise)} мм\nДлина до конька: ${fmt(r.lenRidge)} мм\nПо кромке со свесом: ${fmt(r.lenBottom)} мм\n` +
-      `Доска: ${r.board ? fmt(r.board / 1000, 1) + " м" : "сращивать"}\nПар: ${sp.pairs} (${sp.rafters} шт.), шаг ${fmt(sp.step)} мм` +
-      (S.paid ? `\nЗапил: ${fmt(r.d)} мм, площадка ${fmt(r.seat)} мм, рез ${fmt(r.plumbAngleToEdge, 1)}° к кромке` : "");
+      `Высота конька: ${fmt(r.rise)} мм\nДлина до конька: ${fmt(r.lenRidge)} мм\nГабарит доски с резами: ${fmt(gab)} мм\n` +
+      `Доска: ${board ? fmt(board / 1000, 1) + " м" : "сращивать"}\nПар: ${sp.pairs} (${sp.rafters} шт.), шаг ${fmt(sp.step)} мм` +
+      (S.paid ? `\nЗапил: ${fmt(r.d)} мм, площадка ${fmt(r.seat)} мм, рез ${fmt(r.plumbAngleToEdge, 1)}° к кромке` +
+        (ridge.type === "beam" ? `\nКонёк на прогон: упор ${fmt(ridge.lowerFace)} мм, площадка ${fmt(ridge.seat)} мм` : "\nКонёк: встык по отвесу") : "");
     if (CFG.API_URL && tg) {
       try { const res = await api("sendText", { text }); if (res.ok) return toast("Отправлено в чат"); } catch (_) {}
     }

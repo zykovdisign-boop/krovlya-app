@@ -48,6 +48,32 @@
     };
   }
 
+  /* Конец стропила у конька. Координаты доски: x вдоль нижней кромки (0 = вертикаль опорного запила), y вверх.
+     type: "butt" — рез по отвесу на оси конька (встык);
+           "beam" — запил на коньковый прогон: нижний упор по грани прогона, горизонтальная площадка, верхний рез по оси. */
+  function ridgeEnd({ run, angle, h, type = "butt", beamW = 150, dr = null }) {
+    const a = rad(angle), s = Math.sin(a), c = Math.cos(a), t = Math.tan(a);
+    const tAxis = run / c;
+    if (type !== "beam") {
+      return { type: "butt", pts: [[tAxis, 0], [tAxis + h * t, h]], full: h / c, bottomEnd: tAxis, topEnd: tAxis + h * t, warnings: [] };
+    }
+    const half = beamW / 2;
+    const minDr = half * t;                               // мельче нельзя: площадка уйдёт ниже кромки
+    if (dr == null || dr === "") dr = Math.max(Math.round(h / 4), Math.ceil(minDr + 10));
+    const tb = (run - half) / c;
+    const B0 = [tb, 0];
+    const B1 = [tb + dr * s, dr * c];                     // вверх по отвесу на глубину запила
+    const B2 = [B1[0] + half * c, B1[1] - half * s];      // по горизонтали до оси конька
+    const up = (h - B2[1]) / c;
+    const B3 = [B2[0] + up * s, h];                       // по отвесу до верхней кромки
+    const warnings = [];
+    if (dr < minDr) warnings.push(`Запил в коньке мельче ${Math.ceil(minDr)} мм: площадка не ляжет на прогон.`);
+    if (dr > h / 3 + 0.5) warnings.push("Запил в коньке глубже трети доски: возьмите прогон уже или стропило выше.");
+    const footX = B2[0] - B2[1] * t;                      // где верхний рез, продолженный вниз, пересекает нижнюю кромку
+    return { type: "beam", pts: [B0, B1, B2, B3], dr, seat: half, lowerFace: dr, upperFace: up, full: h / c,
+      bottomEnd: tb, topEnd: B3[0], foot: footX - tb, warnings };
+  }
+
   /* Шаг и число стропильных пар по длине дома */
   function spacing({ length, step = 600 }) {
     const intervals = Math.ceil(length / step - 1e-9);
@@ -113,7 +139,7 @@
     };
   }
 
-  const api = { slope, rafter, spacing, hip, rafterSection, beamSection, checkSection, jigOutline, BOARDS };
+  const api = { slope, rafter, ridgeEnd, spacing, hip, rafterSection, beamSection, checkSection, jigOutline, BOARDS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.RoofCore = api;
 })(typeof window !== "undefined" ? window : globalThis);
