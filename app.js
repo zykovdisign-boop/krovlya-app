@@ -180,7 +180,8 @@
       if (ridge.type === "beam") parts.push({ name: "Коньковый прогон", n: 1, len: L + 2 * over, sec: "по расчёту" });
     }
     const perim = 2 * (W + L);
-    parts.push({ name: "Мауэрлат 150×150", n: Math.ceil(perim / 6000) + 1, len: 6000, sec: "150×150", b: 150, h: 150, note: `периметр ${fmt(perim / 1000, 1)} м + запас на замки` });
+    if (p.box !== "timber" && p.box !== "frame")       // на брусе роль мауэрлата играет верхний венец, на каркасе — обвязка
+      parts.push({ name: "Мауэрлат 150×150", n: Math.ceil(perim / 6000) + 1, len: 6000, sec: "150×150", b: 150, h: 150, note: `периметр ${fmt(perim / 1000, 1)} м + запас на замки` });
     let total = 0;
     parts.forEach((q) => {
       q.board = q.len === 6000 ? 6000 : q.len <= 6000 ? stdLen(q.len) : null;
@@ -202,15 +203,114 @@
       ${mm2.secOk ? "" : `<div class="warn">Сечение 50×200 взято условно: при таком пролёте нужен подкос или расчёт.</div>`}
       <button class="btn ghost" data-act="sendMap" type="button">Отправить карту в чат</button>`;
     const sample = mapCalc({ ...DEFAULT, height: 2801 });
-    v.innerHTML = `<h2>Карта стропил</h2>
-      <div class="card"><h3>План сверху</h3><p class="sub">${p.form === "hip" ? "Вальмовая" : "Двускатная"} · ${fmt(m.W / 1000, 1)} × ${fmt(m.L / 1000, 1)} м · шаг ${f0(m.sp.step)} мм. Нажмите, чтобы увеличить</p>${plan}</div>
-      <div class="card"><h3>Что пилить</h3>${S.paid ? list(m) : `<div class="locked-body">${list(sample)}</div>${lockHtml("Карта раскроя", "Все детали крыши с количеством, длинами, сечением и объёмом леса.")}`}</div>
+    const mode = S.mapMode || "cut";
+    const seg = `<div class="seg" style="margin-bottom:12px"><button type="button" data-mm="cut" class="${mode === "cut" ? "on" : ""}">Раскрой</button><button type="button" data-mm="est" class="${mode === "est" ? "on" : ""}">Смета</button></div>`;
+    if (mode === "est") {
+      v.innerHTML = `<h2>Смета</h2>${seg}
+        <div class="card"><div class="grid">
+          <label class="f full"><span><input type="checkbox" data-ins ${p.insulate ? "checked" : ""} style="width:auto;margin-right:8px;vertical-align:-2px">Утепляю скаты (мансарда)</span></label>
+          ${field("wallH", "Высота стен до карниза, мм", { ph: "3000" })}
+          ${field("step", "Шаг стропил, мм")}
+        </div><p class="note">Цены впишите сами — они меняются, а количество посчитано по вашей крыше. Нормы расхода типовые: сверьте с инструкцией производителя материала.</p></div>
+        <div id="estBody"></div>`;
+      const draw = () => { $("#estBody").innerHTML = S.paid ? estimateHtml(p) : `<div class="card"><div class="locked-body">${estimateHtml({ ...DEFAULT, height: 2801, prices: {} }, true)}</div>${lockHtml("Смета", "Все материалы и крепёж: стропила, обрешётка, кровля, доборы, мембрана, водосток, уголки, шпильки, саморезы, гвозди, скобы.")}</div>`; };
+      bindFields(v, draw);
+      $("[data-ins]", v).addEventListener("change", (e) => { P().insulate = e.target.checked; save(); draw(); });
+      v.addEventListener("click", (e) => { const b = e.target.closest("[data-mm]"); if (b) { S.mapMode = b.dataset.mm; viewMap(); } });
+      v.addEventListener("input", (e) => {
+        const inp = e.target.closest("[data-price]");
+        if (!inp) return;
+        const pp = P(); pp.prices = pp.prices || {};
+        const val = Number(String(inp.value).replace(",", "."));
+        if (inp.value === "" || isNaN(val)) delete pp.prices[inp.dataset.price]; else pp.prices[inp.dataset.price] = val;
+        save(); updateEstTotals();
+      });
+      draw();
+      return;
+    }
+    v.innerHTML = `<h2>Карта стропил</h2>${seg}
+      <div class="card"><h3>План сверху</h3><p class="sub">${p.form === "hip" ? "Вальмовая" : "Двускатная"} · ${fmt(m.W / 1000, 1)} × ${fmt(m.L / 1000, 1)} м · шаг ${f0(m.sp.step)} мм. Нажмите, чтобы увеличить</p><div id="planBox">${plan}</div></div>
+      <div class="card"><h3>Что пилить</h3><div id="cutBox">${S.paid ? list(m) : `<div class="locked-body">${list(sample)}</div>${lockHtml("Карта раскроя", "Все детали крыши с количеством, длинами, сечением и объёмом леса.")}`}</div></div>
       <div class="card"><h3>Шаг и снег</h3><div class="grid">
         ${field("step", "Шаг стропил, мм")}
         ${field("snow", "Снег", { options: [["100", "Мало"], ["180", "Средне"], ["250", "Много"], ["320", "Очень много"]] })}
       </div></div>`;
-    bindFields(v, viewMap);
-    v.addEventListener("click", (e) => { const z = e.target.closest("svg.plan"); if (z) openZoom(z.outerHTML); });
+    bindFields(v, () => {                              // перерисовываем только план и список, поля не теряют фокус
+      const p2 = P(), m2 = mapCalc(p2);
+      $("#planBox").innerHTML = planSvg(p2, m2);
+      if (S.paid) $("#cutBox").innerHTML = list(m2);
+    });
+    v.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-mm]");
+      if (b) { S.mapMode = b.dataset.mm; return viewMap(); }
+      const z = e.target.closest("svg.plan"); if (z) openZoom(z.outerHTML);
+    });
+  }
+
+  /* ---------- смета ---------- */
+  function estimateCalc(p) {
+    const m = mapCalc(p);
+    const rafterParts = m.parts.filter((q) => /^Стропила|^Накосные|^Нарожник/.test(q.name));
+    const rafters = rafterParts.reduce((a, q) => a + q.n, 0);
+    const rafterLenTotal = rafterParts.reduce((a, q) => a + q.n * q.len, 0);
+    const splices = rafterParts.filter((q) => q.len > 6000).reduce((a, q) => a + q.n, 0);
+    const hp = p.form === "hip" ? C.hip({ run: m.run, angle: m.r.angle, over: m.over, step: m.sp.step }) : null;
+    const ridge = C.ridgeEnd({ run: m.run, angle: m.r.angle, h: m.r.h, type: p.ridge || "butt" });
+    return C.estimate({
+      W: m.W, L: m.L, angle: m.r.angle, over: m.over, form: p.form, material: p.material, step: m.sp.step,
+      rafters, rafterLenTotal, hipLenTotal: hp ? hp.hipWithOver * 4 : 0, ridgeType: ridge.type, box: p.box,
+      insulate: !!p.insulate, wallH: num(p.wallH, 3000), splices, pairs: Math.ceil(rafters / 2),
+    });
+  }
+  function estimateHtml(p, sample = false) {
+    const e = estimateCalc(p);
+    const prices = p.prices || {};
+    const q = (x) => (Number.isInteger(x) ? f0(x) : fmt(x, 2));
+    const rows = e.groups.map((g) => `<div class="card"><h3>${g.group}</h3><table class="parts est">
+      ${g.items.map((it) => `<tr><td>${it.name}${it.note ? `<small>${it.note}</small>` : ""}</td>
+        <td class="qty">${q(it.qty)}<small>${it.unit}</small></td>
+        <td class="pr"><input data-price="${it.key}" data-qty="${it.qty}" type="number" inputmode="decimal" placeholder="цена" value="${prices[it.key] ?? ""}" ${sample ? "disabled" : ""}></td>
+        <td class="sum" data-sum="${it.key}"></td></tr>`).join("")}
+      </table><div class="res"><span class="k">Итого по разделу</span><span class="v" data-gsum="${g.group}">—</span></div></div>`).join("");
+    setTimeout(updateEstTotals, 0);
+    return `<div class="card"><div class="res">
+        <span class="k">Площадь кровли по скатам</span><span class="v">${fmt(e.area, 1)} м²</span>
+        <span class="k">Карниз / конёк</span><span class="v">${fmt(e.eave, 1)} / ${fmt(e.ridge, 1)} м</span>
+        <hr><span class="k">Итого по смете</span><span class="v big" id="estTotal">—</span>
+      </div>${sample ? "" : `<button class="btn ghost" data-act="sendEst" type="button">Отправить смету в чат</button>`}</div>${rows}`;
+  }
+  function updateEstTotals() {
+    let total = 0, filled = 0;
+    const groups = {};
+    document.querySelectorAll("[data-price]").forEach((inp) => {
+      const price = Number(String(inp.value).replace(",", "."));
+      const qty = Number(inp.dataset.qty);
+      const cell = document.querySelector(`[data-sum="${inp.dataset.price}"]`);
+      const grp = inp.closest(".card").querySelector("[data-gsum]").dataset.gsum;
+      groups[grp] = groups[grp] || 0;
+      if (inp.value !== "" && !isNaN(price)) {
+        const s = price * qty; total += s; groups[grp] += s; filled++;
+        if (cell) cell.textContent = f0(s);
+      } else if (cell) cell.textContent = "";
+    });
+    document.querySelectorAll("[data-gsum]").forEach((el) => { el.textContent = groups[el.dataset.gsum] ? `${f0(groups[el.dataset.gsum])} ₽` : "—"; });
+    const t = $("#estTotal");
+    if (t) t.textContent = filled ? `${f0(total)} ₽` : "впишите цены";
+  }
+  async function sendEst() {
+    const p = P(), e = estimateCalc(p), prices = p.prices || {};
+    let total = 0;
+    const lines = e.groups.map((g) => `— ${g.group} —\n` + g.items.map((it) => {
+      const pr = prices[it.key];
+      const s = pr != null ? pr * it.qty : null;
+      if (s) total += s;
+      return `${it.name}: ${Number.isInteger(it.qty) ? it.qty : fmt(it.qty, 2)} ${it.unit}${s ? ` = ${f0(s)} ₽` : ""}`;
+    }).join("\n")).join("\n\n");
+    const text = `Смета · ${p.name}\nКровля ${fmt(e.area, 1)} м², ${materialOf(p).t}\n\n${lines}${total ? `\n\nИтого: ${f0(total)} ₽` : ""}`;
+    if (CFG.API_URL && tg) {
+      try { const res = await api("sendText", { text: text.slice(0, 4000) }); if (res.ok) return toast("Смета в чате"); } catch (_) {}
+    }
+    try { await navigator.clipboard.writeText(text); toast("Скопировано"); } catch (_) { toast("Не удалось отправить"); }
   }
   function planSvg(p, m) {
     const Wm = m.W, Lm = m.L, ov = m.over, run = m.run;
@@ -842,6 +942,7 @@
     if (a === "jig") makeJig();
     if (a === "sendRafter") sendRafter();
     if (a === "sendMap") sendMap();
+    if (a === "sendEst") sendEst();
     if (a === "book") tg ? tg.openLink(CFG.BOOK_URL) : window.open(CFG.BOOK_URL);
     if (a === "author") tg ? tg.openTelegramLink("https://t.me/" + CFG.AUTHOR_CONTACT.replace("@", "")) : 0;
     if (a === "demo") { try { localStorage.setItem("demoPaid", S.paid ? "0" : "1"); } catch (_) {} checkAccess().then(render); }
