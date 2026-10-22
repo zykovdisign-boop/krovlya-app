@@ -6,13 +6,13 @@
   <title>Крыша без переделок</title>
   <script>
     /* автообновление: если на сервере версия новее, перезагружаемся мимо кэша Telegram */
-    window.APP_VERSION = 12;
+    window.APP_VERSION = 13;
     fetch("version.json?t=" + Date.now(), { cache: "no-store" }).then((r) => r.json()).then((j) => {
       if (j.v > window.APP_VERSION && !location.search.includes("v=" + j.v)) location.replace(location.pathname + "?v=" + j.v + location.hash);
     }).catch(() => {});
   </script>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=12">
+  <link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
   <header class="top">
@@ -37,10 +37,10 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="config.js?v=12"></script>
-  <script src="core.js?v=12"></script>
-  <script src="checklists.js?v=12"></script>
-  <script src="tips.js?v=12"></script>
-  <script src="app.js?v=12"></script>
+  <script src="config.js?v=13"></script>
+  <script src="core.js?v=13"></script>
+  <script src="checklists.js?v=13"></script>
+  <script src="tips.js?v=13"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

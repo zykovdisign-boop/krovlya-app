@@ -29,7 +29,7 @@
 
   const DEFAULT = {
     name: "Мой дом", width: 8000, length: 10000, height: 2800, over: 500, form: "gable", material: "metal", box: "gas",
-    step: 600, h: 200, b: 50, d: "", plate: 150, snow: 180, ridge: "butt", beamW: 150, dr: "",
+    step: 600, h: 200, b: 50, d: "", plate: 150, snow: 180, ridge: "board", ridgeT: 50, beamW: 150, dr: "", notchV: 2, shift: 0, beamStep: 600, attic: "warm",
   };
   // материалы из книги (глава 2): вес с пирогом для расчёта, минимальный уклон
   const MATERIALS = [
@@ -43,7 +43,14 @@
   const rad = (d) => (d * Math.PI) / 180;
   const materialOf = (p) => MATERIALS.find((m) => m.k === p.material) || MATERIALS[2];
   const heightOf = (p) => num(p.height, (num(p.width, 8000) / 2) * Math.tan(rad(num(p.angle, 35))));
-  const angleOf = (p) => (Math.atan(heightOf(p) / (num(p.width, 8000) / 2)) * 180) / Math.PI;
+  const FORMS = [["shed", "Односкатная"], ["gable", "Двускатная"], ["hip", "Вальмовая"]];
+  const formName = (p) => (FORMS.find((f) => f[0] === (p.form || "gable")) || FORMS[1])[1].toLowerCase();
+  const wingOf = (p) => (p.wing && p.wing.on ? p.wing : null);
+  function modelOf(p) {
+    return C.roofModel({ W: num(p.width, 8000), L: num(p.length, 10000), H: heightOf(p), form: p.form || "gable",
+      over: num(p.over, 0), plate: num(p.plate, 150), step: num(p.step, 600), shift: num(p.shift, 0), wing: wingOf(p) });
+  }
+  const angleOf = (p) => modelOf(p).slopes[0].angle;
   const S = { projects: [], cur: null, prog: {}, paid: false, until: null, tab: "project", openList: null };
   const P = () => S.projects.find((p) => p.id === S.cur) || S.projects[0];
   let saveTimer;
@@ -125,37 +132,115 @@
         ${field("length", "Длина, мм (вдоль конька)")}
         ${field("box", "Стены", { options: [["gas", "Газобетон / пеноблок"], ["brick", "Кирпич"], ["timber", "Брус / бревно"], ["frame", "Каркас"]], full: true })}
       </div></div>
-      <div class="card"><h3>Крыша</h3><div class="grid">
-        <label class="f">Высота конька над мауэрлатом, мм<input data-height type="number" inputmode="decimal" value="${Math.round(heightOf(p))}"></label>
-        ${field("over", "Свес по горизонтали, мм")}
-        ${field("form", "Тип крыши", { options: [["gable", "Двускатная"], ["hip", "Вальмовая"]] })}
-        ${field("material", "Кровельный материал", { options: MATERIALS.map((m) => [m.k, m.t]) })}
-      </div><div id="slopeInfo"></div></div>
-      <div class="card" id="advice"></div>`;
-    bindFields(v, projectOut);
+      <div class="card"><h3>Форма крыши</h3>
+        <div class="seg" id="formSeg">${FORMS.map(([k, t]) => `<button type="button" data-form="${k}" class="${(p.form || "gable") === k ? "on" : ""}">${t}</button>`).join("")}</div>
+        <div id="formPlan" class="mini-plan"></div>
+        <div id="formCtl"></div>
+        <div id="wingCard" class="wing-box"></div></div>
+      <div class="card"><h3>Высота и материал</h3><div class="grid">
+          <label class="f"><span id="hLabel"></span><input data-height type="number" inputmode="decimal" value="${Math.round(heightOf(p))}"></label>
+          ${field("over", "Свес по горизонтали, мм")}
+          ${field("material", "Кровельный материал", { options: MATERIALS.map((m) => [m.k, m.t]), full: true })}
+        </div><div id="slopeInfo"></div></div>
+      <div class="card" id="advice"></div>
+      <div class="card"><h3>Проект в PDF</h3>
+        <p class="note" style="margin-top:0">План крыши, разметка всех стропил, детали, балки перекрытия и количество материалов — одним файлом для печати.</p>
+        <button class="btn" data-act="projPdf" type="button">Собрать PDF проекта</button></div>`;
+    bindFields(v, () => projectOut());
+    v.querySelectorAll("[data-k='width'],[data-k='length']").forEach((el) => el.addEventListener("change", () => projectOut(true)));
     $("[data-height]", v).addEventListener("input", (e) => {
       const raw = Number(String(e.target.value).replace(",", "."));
       if (raw > 0) { P().height = raw; save(); projectOut(); }
     });
-    projectOut();
+    v.addEventListener("click", (e) => {
+      const fb = e.target.closest("[data-form]");
+      if (fb) {
+        const pp = P(); pp.form = fb.dataset.form; save();
+        v.querySelectorAll("[data-form]").forEach((b) => b.classList.toggle("on", b === fb));
+        projectOut(true); haptic(); return;
+      }
+      const wb = e.target.closest("[data-wset]");
+      if (wb) { const [k, val] = wb.dataset.wset.split(":"); P().wing[k] = val; save(); projectOut(true); haptic(); }
+    });
+    v.addEventListener("input", (e) => {
+      const sl = e.target.closest("[data-slider]");
+      if (!sl) return;
+      const pp = P(), key = sl.dataset.slider, val = Number(sl.value);
+      if (key === "shift") pp.shift = val; else pp.wing[key] = val;
+      const lab = v.querySelector(`[data-sval="${key}"]`);
+      if (lab) lab.textContent = sliderText(key, val, pp);
+      save(); projectOut();
+    });
+    v.addEventListener("change", (e) => {
+      const cb = e.target.closest("[data-wing-on]");
+      if (!cb) return;
+      const pp = P();
+      pp.wing = Object.assign({ side: "front", form: "gable", w: Math.round(num(pp.length, 10000) * 0.35 / 100) * 100, depth: 2000, pos: 0, angle: 20 }, pp.wing || {}, { on: cb.checked });
+      save(); projectOut(true); haptic();
+    });
+    projectOut(true);
   }
-  function projectOut() {
+  function sliderText(key, val, p) {
+    if (key === "shift") return val === 0 ? "посередине" : `${f0(Math.abs(val))} мм ${val > 0 ? "к заднему скату" : "к переднему скату"}`;
+    if (key === "pos") return val === 0 ? "по центру стены" : `${f0(Math.abs(val))} мм ${val > 0 ? "вправо" : "влево"}`;
+    if (key === "angle") return `${val}°`;
+    return `${f0(val)} мм`;
+  }
+  function slider(key, label, min, max, step, val, p) {
+    const v = Math.min(max, Math.max(min, val));
+    return `<label class="sl"><span>${label}<b data-sval="${key}">${sliderText(key, v, p)}</b></span>
+      <input type="range" data-slider="${key}" min="${min}" max="${max}" step="${step}" value="${v}"></label>`;
+  }
+  function formCtlHtml(p) {
+    const W = num(p.width, 8000);
+    if (p.form === "gable") {
+      const lim = Math.max(0, Math.floor((W / 2 - 500) / 50) * 50);
+      return slider("shift", "Конёк", -lim, lim, 50, num(p.shift, 0), p) +
+        `<p class="note" style="margin-top:4px">Сдвиньте конёк, если скаты разные: стропила каждого ската посчитаются отдельно.</p>`;
+    }
+    if (p.form === "shed") return `<p class="note">Высокая стена — задняя, скат на переднюю. Задайте перепад высоты стен по верху мауэрлатов.</p>`;
+    return `<p class="note">Вальмы под 45° в плане, конёк посередине.</p>`;
+  }
+  function wingHtml(p) {
+    if (p.form === "shed") return `<h3>Пристройка</h3><p class="note" style="margin-top:0">Пристройку можно добавить к двускатной или вальмовой крыше.</p>`;
+    const w = wingOf(p), L = num(p.length, 10000);
+    let h = `<h3>Пристройка</h3><label class="tgl"><input type="checkbox" data-wing-on ${w ? "checked" : ""}><span>Есть пристройка: крыло буквой «Г», эркер, крыша над балконом</span></label>`;
+    if (!w) return h;
+    const ww = Math.min(num(w.w, 3000), L), lim = Math.max(0, Math.floor((L - ww) / 2 / 50) * 50);
+    const seg = (k, opts) => `<div class="seg" style="margin-top:10px">${opts.map(([val, t]) => `<button type="button" data-wset="${k}:${val}" class="${w[k] === val ? "on" : ""}">${t}</button>`).join("")}</div>`;
+    h += seg("side", [["front", "Спереди"], ["back", "Сзади"]]);
+    h += seg("form", [["gable", "Двускатная"], ["hip", "С вальмой"], ["shed", "Навес"]]);
+    h += slider("w", "Ширина вдоль стены", 1000, L, 100, ww, p);
+    h += slider("depth", "Вынос от стены", 600, 8000, 100, num(w.depth, 2000), p);
+    h += slider("pos", "Сдвиг вдоль стены", -lim, lim, 50, num(w.pos, 0), p);
+    if (w.form === "shed") h += slider("angle", "Уклон навеса", 5, 45, 1, num(w.angle, 20), p);
+    return h;
+  }
+  function projectOut(rebuild = false) {
     const p = P();
+    if (rebuild) {
+      $("#formCtl").innerHTML = formCtlHtml(p);
+      $("#wingCard").innerHTML = wingHtml(p);
+      $("#hLabel").textContent = p.form === "shed" ? "Перепад высоты стен, мм" : "Высота конька над мауэрлатом, мм";
+    }
+    const M = modelOf(p);
+    $("#formPlan").innerHTML = planSvg(p, M, { mini: true });
     const mat = materialOf(p);
-    const ang = angleOf(p);
-    const okSlope = ang >= mat.min;
-    $("#slopeInfo").innerHTML = `<div class="res" style="margin-top:12px">
-        <span class="k">Уклон получается</span><span class="v big" style="color:${okSlope ? "inherit" : "var(--accent)"}">${fmt(ang, 1)}°</span>
+    const rows = M.slopes.map((s) => `<span class="k">${M.slopes.length > 1 ? `Уклон: ${s.label.toLowerCase()}` : "Уклон получается"}</span><span class="v ${M.slopes.length > 1 ? "" : "big"}" style="color:${s.angle >= mat.min ? "inherit" : "var(--accent)"}">${fmt(s.angle, 1)}°</span>`).join("");
+    const minA = Math.min(...M.slopes.map((s) => s.angle));
+    const okSlope = minA >= mat.min;
+    const flat = M.slopes.find((s) => s.angle === minA);
+    $("#slopeInfo").innerHTML = `<div class="res" style="margin-top:12px">${rows}
         <span class="k">Минимум для материала</span><span class="v">${mat.min}°</span>
         <span class="k">Вес кровли</span><span class="v">${mat.w} кг/м²</span></div>
-      ${okSlope ? "" : `<div class="warn">Уклон меньше минимального для «${mat.t}». Поднимите конёк хотя бы до ${f0((num(p.width, 8000) / 2) * Math.tan(rad(mat.min)))} мм или выберите другой материал.</div>`}`;
-    const out = [];
+      ${okSlope ? "" : `<div class="warn">${flat.label}: уклон меньше минимального для «${mat.t}». ${flat.wing ? "Сделайте пристройку круче" : `Поднимите ${p.form === "shed" ? "верхнюю стену" : "конёк"} хотя бы до ${f0(heightOf(p) * Math.tan(rad(mat.min)) / Math.tan(rad(minA)))} мм`} или выберите другой материал.</div>`}`;
+    const out = M.warnings.map((w) => `<div class="warn">${w}</div>`);
     if (mat.heavy && (p.box === "timber" || p.box === "frame"))
       out.push(`<div class="warn">${mat.t} на ${p.box === "timber" ? "брусовом" : "каркасном"} доме: в книге (глава 2.8) объяснено, почему так делать не стоит. Выберите лёгкую кровлю.</div>`);
     if (p.box === "timber") out.push(`<p class="note">Брус садится: стропила крепите на скользящих опорах, стойки ставьте на компенсаторы усадки.</p>`);
     if (p.box === "gas") out.push(`<p class="note">Газобетон: нужен сплошной армопояс со шпильками и система без распора или с затяжкой внизу.</p>`);
-    if (num(p.width, 0) / 2 > 6000) out.push(`<div class="warn">Пролёт больше 12 м без промежуточных опор: нужен расчёт конструктора.</div>`);
-    if (ang > 50) out.push(`<p class="note">Уклон круче 50°: крыша будет высокой и парусной, проверьте, этого ли вы хотите.</p>`);
+    if (Math.max(...M.slopes.map((s) => s.run)) > 6000) out.push(`<div class="warn">Заложение стропила больше 6 м без промежуточных опор: нужен расчёт конструктора.</div>`);
+    if (Math.max(...M.slopes.map((s) => s.angle)) > 50) out.push(`<p class="note">Уклон круче 50°: крыша будет высокой и парусной, проверьте, этого ли вы хотите.</p>`);
     $("#advice").innerHTML = `<h3>Что учесть</h3>${out.join("") || `<p class="note">Всё в порядке. Дальше — вкладка «Стропила».</p>`}`;
   }
 
@@ -193,80 +278,152 @@
     draw();
   }
 
-  /* ---------- вкладка: карта стропил ---------- */
+  /* ---------- вкладка: карта стропил и балок ---------- */
   function mapCalc(p) {
-    const { r, ridge, gab, board, sp, run } = rafterCalc(false, p);
+    const M = modelOf(p);
     const W = num(p.width, 8000), L = num(p.length, 10000), over = num(p.over, 0);
-    const sec = C.rafterSection({ span: run, step: num(p.step, 600), roof: materialOf(p).heavy ? 110 : 50, snow: num(p.snow, 180), angle: r.angle });
+    const mainSl = M.slopes.filter((s) => !s.wing);
+    const maxRun = Math.max(...mainSl.map((s) => s.run));
+    const sec = C.rafterSection({ span: maxRun, step: num(p.step, 600), roof: materialOf(p).heavy ? 110 : 50, snow: num(p.snow, 180), angle: mainSl[0].angle });
     const s = sec.section || { b: 50, h: 200, label: "50×200" };
     const vol = (len, n, b = s.b, h = s.h) => (len / 1000) * (b / 1000) * (h / 1000) * n;
     const parts = [];
-    const stdLen = (x) => C.BOARDS.find((b) => b >= x + 50) || null;
+    const lensNote = (arr) => "длины: " + arr.map((q) => `${f0(q.len)}${q.n > 1 ? ` ×${q.n}` : ""}`).join(", ");
+    const listRow = (name, arr, extra = 0) => {
+      if (!arr.length) return;
+      parts.push({ name, n: arr.reduce((a, q) => a + q.n, 0), len: Math.max(...arr.map((q) => q.len)) + extra, sec: s.label, note: lensNote(arr), raf: true });
+    };
+    const main = rafterCalc(false, p, mainSl[0].key);
+    const short = M.ex.mainShort.reduce((a, q) => a + q.n, 0);
     if (p.form === "hip") {
-      const hp = C.hip({ run, angle: r.angle, over, step: sp.step });
-      const xs = [];
-      for (let i = 0; i <= sp.intervals; i++) xs.push(i * sp.step);
-      const common = xs.filter((x) => x >= run - 1 && x <= L - run + 1).length;
-      parts.push({ name: "Стропила рядовые", n: common * 2 + 2, len: gab, sec: s.label, note: "включая 2 центральных на вальмах" });
-      parts.push({ name: "Накосные стропила (спаренные)", n: 8, len: hp.hipWithOver + 100, sec: s.label, note: "4 угла × 2 доски" });
-      hp.jacks.forEach((j) => parts.push({ name: `Нарожник №${j.n}`, n: 8, len: j.withOver + 150, sec: s.label }));
-      if (ridge.type === "beam") parts.push({ name: "Коньковый прогон", n: 1, len: Math.max(L - 2 * run, 0), sec: "по расчёту" });
+      const run = W / 2;
+      const hp = C.hip({ run, angle: mainSl[0].angle, over, step: M.sp.step });
+      const common = M.xs.filter((x) => x >= run - 1 && x <= L - run + 1).length;
+      parts.push({ name: "Стропила рядовые", n: common * 2 + 2 - short, len: main.gab, sec: s.label, note: "включая 2 центральных на вальмах", raf: true });
+      parts.push({ name: "Накосные стропила (спаренные)", n: 8, len: hp.hipWithOver + 100, sec: s.label, note: "4 угла × 2 доски", raf: true });
+      hp.jacks.forEach((j) => parts.push({ name: `Нарожник №${j.n}`, n: 8, len: j.withOver + 150, sec: s.label, raf: true }));
     } else {
-      parts.push({ name: "Стропила", n: sp.rafters, len: gab, sec: s.label, note: `${sp.pairs} пар` });
-      if (ridge.type === "beam") parts.push({ name: "Коньковый прогон", n: 1, len: L + 2 * over, sec: "по расчёту" });
+      mainSl.forEach((sl) => {
+        const rc = sl.key === mainSl[0].key ? main : rafterCalc(false, p, sl.key);
+        parts.push({ name: mainSl.length > 1 ? `Стропила: ${sl.label.toLowerCase()}` : "Стропила", n: sl.n, len: rc.gab, sec: s.label,
+          note: p.form === "shed" ? "по одному в ряду" : mainSl.length > 1 ? `${sl.n} шт.` : `${M.sp.pairs - Math.ceil(short / 2)} пар`, raf: true });
+      });
     }
-    const perim = 2 * (W + L);
+    listRow("Укороченные стропила у ендов", M.ex.mainShort, 100);
+    const ridgeLen = p.form === "hip" ? Math.max(L - W, 0) : L + 2 * over;
+    if (p.form !== "shed") {
+      if (main.ridge.type === "beam") parts.push({ name: "Коньковая доска (прогон)", n: 1, len: ridgeLen, sec: "по расчёту" });
+      else if (main.ridge.ridgeT > 0) parts.push({ name: "Коньковая доска", n: 1, len: ridgeLen, sec: `${f0(main.ridge.ridgeT)}×${f0(s.h + 50)}`, b: main.ridge.ridgeT, h: s.h + 50 });
+    }
+    const wing = M.wing, wsl = M.slopes.find((q) => q.wing);
+    if (wing && wsl) {
+      const wr = rafterCalc(false, p, "wing");
+      parts.push({ name: wing.form === "shed" ? "Стропила навеса" : "Стропила пристройки", n: wsl.n, len: wr.gab, sec: s.label, raf: true,
+        note: wing.form === "shed" ? "верх на опорном брусе у стены" : "" });
+      if (M.ex.valley) parts.push({ name: "Ендовные стропила (спаренные)", n: 4, len: M.ex.valley.len + 100, sec: s.label, note: "2 ендовы × 2 доски", raf: true });
+      listRow("Нарожники у ендов (пристройка)", M.ex.valleyJacks, 150);
+      if (M.ex.wingHip) {
+        parts.push({ name: "Накосные пристройки (спаренные)", n: 4, len: M.ex.wingHip.len + 100, sec: s.label, note: "2 угла × 2 доски", raf: true });
+        listRow("Нарожники вальмы пристройки", M.ex.wingHip.jacks, 150);
+      }
+      if (wing.form === "shed") {
+        parts.push({ name: "Опорный брус навеса на стене", n: 1, len: wing.w + 2 * over, sec: "50×150", b: 50, h: 150 });
+        parts.push({ name: "Балка навеса по столбам", n: 1, len: wing.w + 2 * over, sec: "по расчёту" });
+      } else if (main.ridge.type === "beam" || main.ridge.ridgeT > 0) {
+        parts.push({ name: "Коньковая доска пристройки", n: 1, len: wing.form === "hip" ? wing.depth : wing.depth + over + wing.rw, sec: main.ridge.type === "beam" ? "по расчёту" : `${f0(main.ridge.ridgeT)}×${f0(s.h + 50)}`, b: main.ridge.ridgeT, h: s.h + 50 });
+      }
+    }
+    const perim = 2 * (W + L) + (wing && wing.form !== "shed" ? 2 * wing.depth : 0);
     if (p.box !== "timber" && p.box !== "frame")       // на брусе роль мауэрлата играет верхний венец, на каркасе — обвязка
       parts.push({ name: "Мауэрлат 150×150", n: Math.ceil(perim / 6000) + 1, len: 6000, sec: "150×150", b: 150, h: 150, note: `периметр ${fmt(perim / 1000, 1)} м + запас на замки` });
     let total = 0;
+    const stdLen = (x) => C.BOARDS.find((b) => b >= x + 50) || null;
     parts.forEach((q) => {
       q.board = q.len === 6000 ? 6000 : q.len <= 6000 ? stdLen(q.len) : null;
       const b = q.b || s.b, h = q.h || s.h;
       q.vol = q.sec === "по расчёту" ? 0 : vol(q.board || q.len, q.n, b, h);
       total += q.vol;
     });
-    return { r, sp, run, W, L, over, parts, total, sec: s, secOk: !!sec.section };
+    return { M, r: main.r, sp: M.sp, run: main.run, W, L, over, parts, total, sec: s, secOk: !!sec.section, beams: beamsCalc(p, M) };
+  }
+  /* балки перекрытия: пролёт по короткой стороне, шаг по длинной */
+  function beamsCalc(p, M) {
+    const step = num(p.beamStep, 600), load = p.attic === "cold" ? 200 : 400;
+    const list = [];
+    const mk = (name, span, along, key) => {
+      const sp = C.spacing({ length: along, step });
+      const sec = C.beamSection({ span, step: sp.step, load }).section;
+      const half = sec ? null : C.beamSection({ span: span / 2, step: sp.step, load }).section;
+      list.push({ key, name, n: sp.pairs, len: span, along, step: sp.step, sec: sec ? sec.label : null, half: half ? half.label : null });
+    };
+    mk("Балки основного дома", M.W, M.L, "main");
+    const w = M.wing;
+    if (w && w.form !== "shed") {
+      if (w.depth <= w.w) mk("Балки пристройки", w.depth, w.w, "wingAcross");
+      else mk("Балки пристройки", w.w, w.depth, "wingAlong");
+    }
+    return { list, step, load };
   }
   function viewMap() {
     const v = $("#view");
     const p = P();
+    const layer = S.mapLayer || "rafters";
     const m = mapCalc(p);
-    const plan = planSvg(p, m);
-    const list = (mm2) => `<table class="parts"><tr><th>Деталь</th><th>Шт.</th><th>Длина</th><th>Доска</th></tr>
+    const cutList = (mm2) => `<table class="parts"><tr><th>Деталь</th><th>Шт.</th><th>Длина</th><th>Доска</th></tr>
       ${mm2.parts.map((q) => `<tr><td>${q.name}${q.note ? `<small>${q.note}</small>` : ""}</td><td>${q.n}</td><td>${f0(q.len)}</td><td>${q.board ? fmt(q.board / 1000, 1) + " м" : q.len > 6000 ? "сращивать" : "—"}<small>${q.sec}</small></td></tr>`).join("")}
       </table>
       <div class="res" style="margin-top:10px"><span class="k">Лес всего (с запасом бери +10 %)</span><span class="v big">${fmt(mm2.total, 2)} м³</span></div>
       ${mm2.secOk ? "" : `<div class="warn">Сечение 50×200 взято условно: при таком пролёте нужен подкос или расчёт.</div>`}
       <button class="btn ghost" data-act="sendMap" type="button">Отправить карту в чат</button>`;
+    const beamList = (b) => `<table class="parts"><tr><th>Деталь</th><th>Шт.</th><th>Длина</th><th>Сечение</th></tr>
+      ${b.list.map((q) => `<tr><td>${q.name}<small>шаг ${f0(q.step)} мм по осям</small></td><td>${q.n}</td><td>${f0(q.len)}</td><td>${q.sec || "нужна опора"}${q.half ? `<small>с опорой посередине ${q.half}</small>` : ""}</td></tr>`).join("")}
+      </table>
+      ${b.list.some((q) => !q.sec) ? `<div class="warn">Пролёт велик для цельной доски: нужна несущая стена или прогон посередине (глава 6).</div>` : ""}
+      <p class="note">Длина — по наружным граням стен. Балки опирают на стену не меньше чем на 150 мм, торцы в кладке обрабатывают и изолируют.</p>`;
     const sample = mapCalc({ ...DEFAULT, height: 2801 });
-    v.innerHTML = `<h2>Карта стропил</h2>
-      <div class="card"><h3>План сверху</h3><p class="sub">${p.form === "hip" ? "Вальмовая" : "Двускатная"} · ${fmt(m.W / 1000, 1)} × ${fmt(m.L / 1000, 1)} м · шаг ${f0(m.sp.step)} мм. Нажмите, чтобы увеличить</p><div id="planBox">${plan}</div></div>
-      <div class="card"><h3>Что пилить</h3><div id="cutBox">${S.paid ? list(m) : `<div class="locked-body">${list(sample)}</div>${lockHtml("Карта раскроя", "Все детали крыши с количеством, длинами, сечением и объёмом леса.")}`}</div></div>
-      <div class="card"><h3>Шаг и снег</h3><div class="grid">
-        ${field("step", "Шаг стропил, мм")}
-        ${field("snow", "Снег", { options: [["100", "Мало"], ["180", "Средне"], ["250", "Много"], ["320", "Очень много"]] })}
-      </div></div>`;
-    bindFields(v, () => {                              // перерисовываем только план и список, поля не теряют фокус
+    const lock = (html, sampleHtml, title, text) => (S.paid ? html : `<div class="locked-body">${sampleHtml}</div>${lockHtml(title, text)}`);
+    v.innerHTML = `<h2>Карта</h2>
+      <div class="seg" id="mapSeg" style="margin-bottom:12px"><button type="button" data-layer="rafters" class="${layer === "rafters" ? "on" : ""}">Стропила</button><button type="button" data-layer="beams" class="${layer === "beams" ? "on" : ""}">Балки перекрытия</button></div>
+      <div class="card"><h3>План сверху</h3><p class="sub" id="planSub"></p><div id="planBox"></div></div>
+      ${layer === "rafters"
+        ? `<div class="card"><h3>Что пилить</h3><div id="cutBox">${lock(cutList(m), cutList(sample), "Карта раскроя", "Все детали крыши с количеством, длинами, сечением и объёмом леса.")}</div></div>
+          <div class="card"><h3>Шаг и снег</h3><div class="grid">
+            ${field("step", "Шаг стропил, мм")}
+            ${field("snow", "Снег", { options: [["100", "Мало"], ["180", "Средне"], ["250", "Много"], ["320", "Очень много"]] })}
+          </div></div>`
+        : `<div class="card"><h3>Балки</h3><div id="cutBox">${lock(beamList(m.beams), beamList(sample.beams), "Балки перекрытия", "Раскладка, количество, длины и сечение балок под ваш пролёт.")}</div></div>
+          <div class="card"><h3>Нагрузка и шаг</h3><div class="grid">
+            ${field("beamStep", "Шаг балок, мм", { ph: "600" })}
+            ${field("attic", "Над перекрытием", { options: [["warm", "Мансарда, жилое"], ["cold", "Холодный чердак"]] })}
+          </div></div>`}`;
+    const draw = () => {
       const p2 = P(), m2 = mapCalc(p2);
-      $("#planBox").innerHTML = planSvg(p2, m2);
-      if (S.paid) $("#cutBox").innerHTML = list(m2);
+      $("#planBox").innerHTML = planSvg(p2, m2.M, { layer, beams: m2.beams });
+      $("#planSub").textContent = layer === "rafters"
+        ? `${FORMS.find((f) => f[0] === (p2.form || "gable"))[1]}${m2.M.wing ? " с пристройкой" : ""} · ${fmt(m2.W / 1000, 1)} × ${fmt(m2.L / 1000, 1)} м · шаг ${f0(m2.sp.step)} мм. Нажмите, чтобы увеличить`
+        : `Балки ${m2.beams.list.map((q) => `${q.n} шт. по ${fmt(q.len / 1000, 2)} м`).join(" + ")} · шаг ${f0(m2.beams.list[0].step)} мм. Нажмите, чтобы увеличить`;
+      if (S.paid) $("#cutBox").innerHTML = layer === "rafters" ? cutList(m2) : beamList(m2.beams);
+    };
+    bindFields(v, draw);                                  // перерисовываем только план и список, поля не теряют фокус
+    draw();
+    v.addEventListener("click", (e) => {
+      const lb = e.target.closest("[data-layer]");
+      if (lb) { S.mapLayer = lb.dataset.layer; freshView(); viewMap(); haptic(); return; }
+      const z = e.target.closest("svg.plan"); if (z) openZoom(z.outerHTML);
     });
-    v.addEventListener("click", (e) => { const z = e.target.closest("svg.plan"); if (z) openZoom(z.outerHTML); });
   }
 
   /* ---------- смета ---------- */
   function estimateCalc(p) {
-    const m = mapCalc(p);
-    const rafterParts = m.parts.filter((q) => /^Стропила|^Накосные|^Нарожник/.test(q.name));
+    const m = mapCalc(p), M = m.M;
+    const rafterParts = m.parts.filter((q) => q.raf);
     const rafters = rafterParts.reduce((a, q) => a + q.n, 0);
     const rafterLenTotal = rafterParts.reduce((a, q) => a + q.n * q.len, 0);
     const splices = rafterParts.filter((q) => q.len > 6000).reduce((a, q) => a + q.n, 0);
-    const hp = p.form === "hip" ? C.hip({ run: m.run, angle: m.r.angle, over: m.over, step: m.sp.step }) : null;
-    const ridge = C.ridgeEnd({ run: m.run, angle: m.r.angle, h: m.r.h, type: p.ridge || "butt" });
     return C.estimate({
-      W: m.W, L: m.L, angle: m.r.angle, over: m.over, form: p.form, material: p.material, step: m.sp.step,
-      rafters, rafterLenTotal, hipLenTotal: hp ? hp.hipWithOver * 4 : 0, ridgeType: ridge.type, box: p.box,
-      insulate: !!p.insulate, wallH: num(p.wallH, 3000), splices, pairs: Math.ceil(rafters / 2),
+      W: m.W, L: m.L, angle: M.slopes[0].angle, over: m.over, form: p.form, material: p.material, step: M.sp.step,
+      rafters, rafterLenTotal, ridgeType: rafterCalc(false, p, M.slopes[0].key).ridge.type, box: p.box,
+      insulate: !!p.insulate, wallH: num(p.wallH, 3000), splices, pairs: Math.ceil(rafters / 2), geo: M.geo, wing: !!M.wing,
     });
   }
   function estimateHtml(p, sample = false) {
@@ -366,7 +523,7 @@
     newPage();
     // шапка
     text("Смета на кровлю", MX, y + 6, 6.5, { w: 800 }); y += 12;
-    text(`${p.name} · ${p.form === "hip" ? "вальмовая" : "двускатная"} · ${fmt(num(p.width, 0) / 1000, 1)} × ${fmt(num(p.length, 0) / 1000, 1)} м · уклон ${fmt(angleOf(p), 1)}°`, MX, y, 3.6, { c: "#444" }); y += 5.5;
+    text(`${p.name} · ${formName(p)} · ${fmt(num(p.width, 0) / 1000, 1)} × ${fmt(num(p.length, 0) / 1000, 1)} м · уклон ${fmt(angleOf(p), 1)}°`, MX, y, 3.6, { c: "#444" }); y += 5.5;
     text(`${materialOf(p).t} · площадь скатов ${fmt(e.area, 1)} м² · ${new Date().toLocaleDateString("ru-RU")}`, MX, y, 3.6, { c: "#444" }); y += 7;
     let total = 0, boughtSum = 0, nB = 0, nAll = 0;
     for (const grp of e.groups) {
@@ -420,41 +577,114 @@
     }
     doc.save(fname);
   }
-  function planSvg(p, m) {
-    const Wm = m.W, Lm = m.L, ov = m.over, run = m.run;
-    const VW = 1000, pad = 70;
-    const k = Math.min((VW - 2 * pad) / (Lm + 2 * ov), 560 / (Wm + 2 * ov));
-    const ox = pad + ov * k, oy = 50 + ov * k;
-    const X = (x) => ox + x * k, Y = (y) => oy + y * k;
-    const H = Y(Wm + ov) + 80;
-    let g = `<rect x="${X(-ov)}" y="${Y(-ov)}" width="${(Lm + 2 * ov) * k}" height="${(Wm + 2 * ov) * k}" fill="none" stroke="${BLUE}" stroke-width="2" stroke-dasharray="6 6"/>
-      <rect x="${X(0)}" y="${Y(0)}" width="${Lm * k}" height="${Wm * k}" fill="#f6f2ea" stroke="${INKC}" stroke-width="2.5"/>`;
-    const n = m.sp.intervals;
-    const raf = (x1, y1, x2, y2, c = "#c99a5b", w = 5) => `<line x1="${X(x1).toFixed(1)}" y1="${Y(y1).toFixed(1)}" x2="${X(x2).toFixed(1)}" y2="${Y(y2).toFixed(1)}" stroke="${c}" stroke-width="${w}"/>`;
-    if (p.form === "hip") {
-      for (let i = 0; i <= n; i++) {
-        const x = i * m.sp.step;
-        if (x >= run - 1 && x <= Lm - run + 1) { g += raf(x, -ov, x, Wm / 2) + raf(x, Wm + ov, x, Wm / 2); }
-        else { const d = Math.min(x, Lm - x); if (d > 30) { g += raf(x, -ov, x, d, "#ddc193", 4) + raf(x, Wm + ov, x, Wm - d, "#ddc193", 4); } }
+  /* План сверху для любой формы. Перед дома (y = 0) внизу. layer: "rafters" | "beams"; mini — эскиз на вкладке «Проект» */
+  function planSvg(p, M, opt = {}) {
+    const W = M.W, L = M.L, ov = M.over, w = M.wing, mini = !!opt.mini, layer = opt.layer || "rafters";
+    const fw = w && w.side === "front" ? w.depth : 0, bw = w && w.side === "back" ? w.depth : 0;
+    const xMin = -ov, xMax = L + ov, yMin = -ov - fw, yMax = W + ov + bw;
+    const VW = 1000, pad = mini ? 30 : 90, maxH = mini ? 480 : 1000, top = mini ? 24 : 50;
+    const k = Math.min((VW - 2 * pad) / (xMax - xMin), maxH / (yMax - yMin));
+    const ox = (VW - (xMax - xMin) * k) / 2;
+    const X = (x) => ox + (x - xMin) * k, Y = (y) => top + (yMax - y) * k;
+    const VH = Y(yMin) + (mini ? 24 : 96);
+    const wy = (v) => (w && w.side === "back" ? W + v : -v);          // v — расстояние от стены наружу
+    const lw = mini ? 0.55 : 1;
+    const ln2 = (x1, y1, x2, y2, c, wd, dash = "") => `<line x1="${X(x1).toFixed(1)}" y1="${Y(y1).toFixed(1)}" x2="${X(x2).toFixed(1)}" y2="${Y(y2).toFixed(1)}" stroke="${c}" stroke-width="${(wd * lw).toFixed(1)}"${dash ? ` stroke-dasharray="${dash}"` : ""} stroke-linecap="round"/>`;
+    const rect = (x1, y1, x2, y2, attrs) => `<rect x="${X(Math.min(x1, x2)).toFixed(1)}" y="${Y(Math.max(y1, y2)).toFixed(1)}" width="${(Math.abs(x2 - x1) * k).toFixed(1)}" height="${(Math.abs(y2 - y1) * k).toFixed(1)}" ${attrs}/>`;
+    const RAF = layer === "beams" ? "#e6dccb" : "#c99a5b", JACK = layer === "beams" ? "#eee6d8" : "#ddc193", HIP = "#8a4b2a", VAL = "#3d6fa3";
+    const rw0 = mini ? 3.5 : 5, jw = mini ? 2.5 : 4;
+    let g = "";
+    // свесы и стены
+    g += rect(-ov, -ov, L + ov, W + ov, `fill="none" stroke="${BLUE}" stroke-width="2" stroke-dasharray="6 6"`);
+    if (w) g += rect(w.x1 - ov, wy(0), w.x2 + ov, wy(w.depth + ov), `fill="none" stroke="${BLUE}" stroke-width="2" stroke-dasharray="6 6"`);
+    if (w) g += rect(w.x1, wy(0), w.x2, wy(w.depth), w.form === "shed" ? `fill="#fbf9f4" stroke="${INKC}" stroke-width="1.5" stroke-dasharray="8 6"` : `fill="#f6f2ea" stroke="${INKC}" stroke-width="2.5"`);
+    g += rect(0, 0, L, W, `fill="#f6f2ea" stroke="${INKC}" stroke-width="2.5"`);
+    // основной объём
+    const step = M.sp.step;
+    const inWing = (x, side) => w && w.form !== "shed" && w.side === side && x > w.x1 + 1 && x < w.x2 - 1;
+    const eOf = (x) => Math.min(x - w.x1, w.x2 - x);
+    if (M.form === "shed") {
+      M.xs.forEach((x) => { g += ln2(x, -ov, x, W + ov, RAF, rw0); });
+      if (!mini) g += `<text x="${X(L / 2).toFixed(1)}" y="${(Y(W) + 30).toFixed(1)}" font-size="22" text-anchor="middle" fill="#6f6c66">высокая стена</text>`;
+    } else if (M.form === "hip") {
+      const run = W / 2;
+      M.xs.forEach((x) => {
+        if (x >= run - 1 && x <= L - run + 1) {
+          g += ln2(x, inWing(x, "front") ? eOf(x) : -ov, x, W / 2, RAF, rw0) + ln2(x, inWing(x, "back") ? W - eOf(x) : W + ov, x, W / 2, RAF, rw0);
+        } else {
+          const d = Math.min(x, L - x);
+          if (d > 30) g += ln2(x, -ov, x, d, JACK, jw) + ln2(x, W + ov, x, W - d, JACK, jw);
+        }
+      });
+      for (let y = step; y < W - 1; y += step) {
+        const d = Math.min(y, W - y);
+        g += ln2(-ov, y, d, y, JACK, jw) + ln2(L + ov, y, L - d, y, JACK, jw);
       }
-      for (let y = m.sp.step; y < Wm - 1; y += m.sp.step) {
-        const d = Math.min(y, Wm - y);
-        g += raf(-ov, y, d, y, "#ddc193", 4) + raf(Lm + ov, y, Lm - d, y, "#ddc193", 4);
-      }
-      g += raf(-ov, Wm / 2, run, Wm / 2) + raf(Lm + ov, Wm / 2, Lm - run, Wm / 2);
-      [[0, 0, run, Wm / 2], [0, Wm, run, Wm / 2], [Lm, 0, Lm - run, Wm / 2], [Lm, Wm, Lm - run, Wm / 2]].forEach(([a, b, c2, d]) => { g += raf(a, b, c2, d, "#8a4b2a", 9); });
-      g += raf(run, Wm / 2, Lm - run, Wm / 2, INKC, 4);
+      g += ln2(-ov, W / 2, run, W / 2, RAF, rw0) + ln2(L + ov, W / 2, L - run, W / 2, RAF, rw0);
+      [[-ov, -ov, run, W / 2], [-ov, W + ov, run, W / 2], [L + ov, -ov, L - run, W / 2], [L + ov, W + ov, L - run, W / 2]].forEach(([a, b, c2, d]) => { g += ln2(a, b, c2, d, HIP, 9); });
+      g += ln2(run, W / 2, L - run, W / 2, INKC, 4);
     } else {
-      for (let i = 0; i <= n; i++) {
-        const x = i * m.sp.step;
-        g += raf(x, -ov, x, Wm + ov);
-        if (i % 2 === 0 || i === n) g += `<text x="${X(x).toFixed(1)}" y="${(Y(-ov) - 12).toFixed(1)}" font-size="22" text-anchor="middle" fill="#6f6c66">${i + 1}</text>`;
-      }
-      g += raf(-ov, Wm / 2, Lm + ov, Wm / 2, INKC, 4);
+      const ry = M.ridgeY;
+      M.xs.forEach((x) => {
+        g += ln2(x, inWing(x, "front") ? eOf(x) : -ov, x, ry, RAF, rw0);
+        g += ln2(x, inWing(x, "back") ? W - eOf(x) : W + ov, x, ry, RAF, rw0);
+      });
+      g += ln2(-ov, ry, L + ov, ry, INKC, 4);
     }
-    g += arrowDim([X(0), Y(Wm + ov)], [X(Lm), Y(Wm + ov)], `${f0(Lm)}`, 34, { fs: 26 });
-    g += arrowDim([X(-ov), Y(0)], [X(-ov), Y(Wm)], `${f0(Wm)}`, 30, { fs: 26 });
-    return `<svg class="draw plan" viewBox="0 0 ${VW} ${H.toFixed(0)}" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,sans-serif">${g}</svg>`;
+    // пристройка
+    if (w) {
+      if (w.form === "shed") {
+        const sp2 = C.spacing({ length: w.w, step });
+        for (let i = 0; i <= sp2.intervals; i++) { const x = w.x1 + i * sp2.step; g += ln2(x, wy(0), x, wy(w.depth + ov), RAF, rw0); }
+        g += ln2(w.x1 - ov, wy(w.depth), w.x2 + ov, wy(w.depth), HIP, 6);
+      } else {
+        const hipEnd = w.form === "hip" && w.depth > w.rw;
+        const fullLen = hipEnd ? w.depth - w.rw : w.depth, n = Math.ceil(fullLen / step - 1e-9);
+        for (let j = 1; j <= n; j++) { const v = (j * fullLen) / n; g += ln2(w.x1 - ov, wy(v), w.x2 + ov, wy(v), RAF, rw0); }
+        for (let v2 = step; v2 < w.rw - 30; v2 += step) { g += ln2(w.x1 + v2, wy(-v2), w.xc, wy(-v2), JACK, jw) + ln2(w.x2 - v2, wy(-v2), w.xc, wy(-v2), JACK, jw); }
+        if (hipEnd) {
+          const vr = w.depth - w.rw;
+          for (let dx = step; dx < w.rw - 30; dx += step) {
+            g += ln2(w.xc - dx, wy(w.depth + ov), w.xc - dx, wy(vr + dx), JACK, jw) + ln2(w.xc + dx, wy(w.depth + ov), w.xc + dx, wy(vr + dx), JACK, jw);
+          }
+          g += ln2(w.xc, wy(w.depth + ov), w.xc, wy(vr), RAF, rw0);
+          g += ln2(w.x1 - ov, wy(w.depth + ov), w.xc, wy(vr), HIP, 9) + ln2(w.x2 + ov, wy(w.depth + ov), w.xc, wy(vr), HIP, 9);
+          g += ln2(w.xc, wy(-w.rw), w.xc, wy(vr), INKC, 4);
+        } else {
+          g += ln2(w.xc, wy(-w.rw), w.xc, wy(w.depth + ov), INKC, 4);
+        }
+        g += ln2(w.x1 - ov, wy(ov), w.xc, wy(-w.rw), VAL, 8) + ln2(w.x2 + ov, wy(ov), w.xc, wy(-w.rw), VAL, 8);
+      }
+    }
+    // балки перекрытия
+    if (layer === "beams" && opt.beams) {
+      opt.beams.list.forEach((b) => {
+        const sp2 = C.spacing({ length: b.along, step: b.step });
+        for (let i = 0; i <= sp2.intervals; i++) {
+          const t = i * sp2.step;
+          if (b.key === "main") g += ln2(t, 0, t, W, HIP, 6);
+          else if (b.key === "wingAcross") g += ln2(w.x1 + t, wy(0), w.x1 + t, wy(w.depth), HIP, 6);
+          else g += ln2(w.x1, wy(t), w.x2, wy(t), HIP, 6);
+        }
+      });
+    }
+    // размеры
+    if (!mini) {
+      g += arrowDim([X(0), Y(yMin)], [X(L), Y(yMin)], f0(L), 40, { fs: 26 });
+      g += arrowDim([X(xMin), Y(W)], [X(xMin), Y(0)], f0(W), 30, { fs: 26 });
+      if (M.form === "gable" && Math.abs(M.shift) > 0) g += arrowDim([X(xMax), Y(M.ridgeY)], [X(xMax), Y(0)], f0(M.ridgeY), -30, { fs: 22 });
+      if (w) {
+        const vEnd = wy(w.depth);
+        g += arrowDim([X(w.x1), Y(vEnd)], [X(w.x2), Y(vEnd)], f0(w.w), w.side === "front" ? -30 : 30, { fs: 22 });
+        g += arrowDim([X(w.x2 + ov), Y(Math.max(wy(0), vEnd))], [X(w.x2 + ov), Y(Math.min(wy(0), vEnd))], f0(w.depth), -30, { fs: 22 });
+      }
+      g += `<text x="${(X(0) + 8).toFixed(1)}" y="${(Y(0) - 10).toFixed(1)}" font-size="20" fill="#8a8780">перед</text>`;
+      if (layer === "rafters") {
+        const lg = (x, c, wd, t) => `<line x1="${x}" y1="${VH - 22}" x2="${x + 34}" y2="${VH - 22}" stroke="${c}" stroke-width="${wd}"/><text x="${x + 42}" y="${VH - 15}" font-size="20" fill="#6f6c66">${t}</text>`;
+        g += lg(40, RAF, 5, "стропила") + lg(200, INKC, 4, "конёк") + (M.form === "hip" || (w && w.form === "hip") ? lg(330, HIP, 8, "накосные") : "") + (w && w.form !== "shed" ? lg(500, VAL, 8, "ендовы") : "");
+      }
+    }
+    return `<svg class="draw plan" viewBox="0 0 ${VW} ${VH.toFixed(0)}" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,sans-serif">${g}</svg>`;
   }
 
   /* ---------- вкладка: книга ---------- */
@@ -513,39 +743,76 @@
   }
 
   /* ---------- вкладка: стропила ---------- */
-  // буквы на схеме: какое поле проекта правит каждая. Уклон можно задать углом Q или высотой H.
+  // буквы на схеме: что правит каждая. Для выбранного ската (S.slope): C — заложение, Q — уклон, H — высота
+  const curSlope = (p) => { const M = modelOf(p); return { M, sl: M.slopes.find((s) => s.key === S.slope) || M.slopes[0] }; };
   const LETTERS = {
     A: { k: "h", t: "A — высота доски", u: "мм" },
-    Q: { k: "height", t: "Q — уклон. Высота конька H пересчитается сама", u: "°",
-      get: (p) => Math.round(angleOf(p) * 10) / 10,
-      set: (v, p) => Math.round((num(p.width, 8000) / 2) * Math.tan(rad(Math.min(v, 75)))) },
-    H: { k: "height", t: "H — высота конька над мауэрлатом. Уклон Q пересчитается сам", u: "мм",
-      get: (p) => Math.round(heightOf(p)) },
-    C: { k: "width", t: "C — заложение: от наружной грани мауэрлата до оси конька", u: "мм", get: (p) => num(p.width, 8000) / 2, set: (v) => v * 2 },
+    Q: { t: "Q — уклон ската. Высота пересчитается сама", u: "°",
+      get: (p) => Math.round(curSlope(p).sl.angle * 10) / 10,
+      apply: (v, p) => {
+        const { M, sl } = curSlope(p), tg2 = Math.tan(rad(Math.min(v, 75)));
+        if (sl.wing && sl.end === "ledger") p.wing.angle = v;
+        else if (sl.wing) p.height = Math.round(M.wing.mainRun * tg2);
+        else p.height = Math.round(sl.run * tg2);
+      } },
+    H: { t: "H — высота конька над мауэрлатом. Уклон пересчитается сам", u: "мм",
+      get: (p) => { const { sl } = curSlope(p); return Math.round(sl.wing ? sl.run * Math.tan(rad(sl.angle)) : heightOf(p)); },
+      apply: (v, p) => {
+        const { sl } = curSlope(p);
+        if (sl.wing && sl.end === "ledger") p.wing.angle = Math.round(deg(Math.atan(v / sl.run)) * 10) / 10;
+        else if (sl.wing) toast("Высоту конька пристройки задают её ширина и уклон основного ската");
+        else p.height = v;
+      } },
+    C: { t: "C — заложение: от наружной грани мауэрлата до оси конька", u: "мм",
+      get: (p) => Math.round(curSlope(p).sl.run),
+      apply: (v, p) => {
+        const { M, sl } = curSlope(p);
+        if (sl.wing) { if (sl.end === "ledger") p.wing.depth = v; else p.wing.w = 2 * v; }
+        else if (p.form === "shed") p.width = v + num(p.plate, 150);
+        else if (sl.side === "both") p.width = 2 * v;
+        else {
+          const other = M.slopes.find((s) => !s.wing && s.key !== sl.key).run;
+          p.width = v + other; p.shift = sl.key === "front" ? (v - other) / 2 : (other - v) / 2;
+        }
+      } },
     D: { k: "over", t: "D — свес по горизонтали", u: "мм" },
-    d: { k: "d", t: "d — глубина опорного запила (пусто — четверть доски)", u: "мм", allowEmpty: true },
+    R: { k: "d", t: "R — остаток доски над запилом, поперёк доски (пусто — запил на четверть доски)", u: "мм", allowEmpty: true,
+      get: (p) => (p.d === "" || p.d == null ? "" : num(p.h, 200) - p.d), set: (v, p) => Math.max(0, num(p.h, 200) - v) },
     M: { k: "plate", t: "M — ширина мауэрлата", u: "мм" },
   };
-  const RIDGES = [["butt", "Встык"], ["beam", "На прогон"]];
+  const RIDGES = [["prop", "Подпирают"], ["board", "В стык"], ["beam", "Опираются"]];
+  const deg = (r) => (r * 180) / Math.PI;
 
   function viewRafter() {
     const v = $("#view");
     const p = P();
-    v.innerHTML = `<h2>Стропила</h2>
-      <div class="card bp-card"><div id="bp"></div><p class="bp-hint">Нажмите на букву, чтобы ввести размер. Уклон задаётся буквой Q или H.</p></div>
-      <div class="card"><h3>Соединение в коньке</h3>
-        <div class="seg" id="ridgeSeg">${RIDGES.map(([k, t]) => `<button type="button" data-ridge="${k}" class="${(p.ridge || "butt") === k ? "on" : ""}">${t}</button>`).join("")}</div>
-        <div id="ridgeFields" class="grid" style="margin-top:10px;${(p.ridge || "butt") === "beam" ? "" : "display:none"}">
-          ${field("beamW", "Ширина прогона, мм", { ph: "150" })}
-          ${field("dr", "Запил в коньке, мм", { ph: "авто" })}
+    const M = modelOf(p);
+    if (!M.slopes.find((s) => s.key === S.slope)) S.slope = M.slopes[0].key;
+    const sl = M.slopes.find((s) => s.key === S.slope);
+    const tabs = M.slopes.length > 1 ? `<div class="seg" id="slopeSeg" style="margin-bottom:12px">${M.slopes.map((s) => `<button type="button" data-slope="${s.key}" class="${s.key === S.slope ? "on" : ""}">${s.wing ? "Пристройка" : s.key === "front" ? "Скат 1" : s.key === "back" ? "Скат 2" : "Основные"}</button>`).join("")}</div>` : "";
+    const ridgeCard = sl.end === "ridge"
+      ? `<div class="card"><h3>Соединение в коньке</h3>
+        <div class="seg" id="ridgeSeg">${RIDGES.map(([k, t]) => `<button type="button" data-ridge="${k}" class="${(p.ridge || "board") === k ? "on" : ""}">${t}</button>`).join("")}</div>
+        <p class="note" id="ridgeName" style="margin-top:8px"></p>
+        <div class="grid" style="margin-top:10px">
+          <div data-rshow="beam">${field("beamW", "Толщина конька (доска или прогон), мм", { ph: "150" })}</div>
+          <div data-rshow="board prop">${field("ridgeT", "Толщина коньковой доски, мм", { ph: "50" })}</div>
+          <div data-rshow="beam prop">${field("dr", "Глубина гнезда по отвесу, мм", { ph: "авто" })}</div>
         </div>
-        <p class="note" id="ridgeNote"></p>
-      </div>
+        <p class="note" id="ridgeNote"></p></div>`
+      : `<div class="card"><h3>Верхний конец</h3><p class="note" style="margin-top:0">${sl.end === "wall"
+        ? "Односкатная: стропило садится вторым запилом на верхнюю стену, такой же формы, как нижний, и выходит за неё на свес D."
+        : "Навес: верх стропила режется по отвесу и упирается в опорный брус на стене, низ садится запилом на балку по столбам."}</p><p class="note" id="ridgeNote" style="display:none"></p></div>`;
+    v.innerHTML = `<h2>Стропила</h2>${tabs}
+      <div class="card bp-card"><div id="bp"></div><p class="bp-hint">Нажмите на букву, чтобы ввести размер. Уклон задаётся буквой Q или H.</p></div>
+      ${ridgeCard}
       <div id="out"></div>
       <div class="card"><h3>Сращивание доски</h3><p class="sub">Рекомендация автора: косой замок с двумя упорами. Нажмите на чертёж, чтобы увеличить</p><div id="splice"></div>
         <p class="note">Стык располагают над опорой или рядом с ней. Крепёж — два шурупа или болта навстречу друг другу, через упоры, как показано стрелками.</p></div>`;
     bindFields(v, rafterOut);
     v.addEventListener("click", (e) => {
+      const sb = e.target.closest("[data-slope]");
+      if (sb) { S.slope = sb.dataset.slope; freshView(); viewRafter(); haptic(); return; }
       const t = e.target.closest("[data-letter]");
       if (t) return editLetter(t.dataset.letter);
       const z = e.target.closest("svg.board");
@@ -554,7 +821,6 @@
       if (rb) {
         P().ridge = rb.dataset.ridge; save();
         v.querySelectorAll("[data-ridge]").forEach((b) => b.classList.toggle("on", b === rb));
-        $("#ridgeFields").style.display = rb.dataset.ridge === "beam" ? "" : "none";
         rafterOut(); haptic();
       }
     });
@@ -586,9 +852,11 @@
     if (!def) return;
     const p = P();
     const cur = def.get ? def.get(p) : p[def.k];
+    const title = L === "H" && p.form === "shed" && !curSlope(p).sl.wing ? "H — перепад высоты стен по верху мауэрлатов. Уклон пересчитается сам"
+      : L === "C" && p.form === "shed" && !curSlope(p).sl.wing ? "C — между запилами: от наружной грани нижней стены до внутренней грани верхней" : def.t;
     const bg = document.createElement("div");
     bg.className = "sheet-bg";
-    bg.innerHTML = `<div class="sheet"><h3>${def.t}</h3>
+    bg.innerHTML = `<div class="sheet"><h3>${title}</h3>
       <input id="letterIn" type="number" inputmode="decimal" value="${cur === "" || cur == null ? "" : cur}" placeholder="${def.allowEmpty ? "авто" : ""}">
       <button class="btn" type="button" data-ok>Готово, ${def.u}</button></div>`;
     document.body.appendChild(bg);
@@ -597,7 +865,10 @@
     const done = () => {
       const raw = inp.value.replace(",", ".").trim();
       if (raw === "" && def.allowEmpty) p[def.k] = "";
-      else if (raw !== "" && !isNaN(raw) && Number(raw) > 0) p[def.k] = def.set ? def.set(Number(raw), p) : Number(raw);
+      else if (raw !== "" && !isNaN(raw) && Number(raw) > 0) {
+        if (def.apply) def.apply(Number(raw), p);
+        else p[def.k] = def.set ? def.set(Number(raw), p) : Number(raw);
+      }
       save(); bg.remove(); rafterOut(); haptic();
     };
     bg.addEventListener("click", (e) => {
@@ -606,34 +877,45 @@
     });
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") done(); });
   }
-  function rafterCalc(sample = false, pp = null) {
+  function rafterCalc(sample = false, pp = null, key = null) {
     const p = sample ? { ...DEFAULT, height: 2801, ridge: P().ridge } : pp || P();
-    const run = num(p.width, 8000) / 2;
-    const r = C.rafter({ run, angle: angleOf(p), over: num(p.over, 0), h: num(p.h, 200),
+    const M = modelOf(p);
+    const sl = M.slopes.find((s) => s.key === (key || S.slope)) || M.slopes[0];
+    const run = sl.run;
+    const r = C.rafter({ run, angle: sl.angle, over: num(p.over, 0), h: num(p.h, 200),
       d: p.d === "" ? null : num(p.d, null), plate: num(p.plate, 150) });
-    const ridge = C.ridgeEnd({ run, angle: r.angle, h: r.h, type: p.ridge || "butt", beamW: num(p.beamW, 150), dr: p.dr === "" ? null : num(p.dr, null) });
+    const type = sl.end === "wall" ? "wall" : sl.end === "ledger" ? "board" : p.ridge || "board";
+    const ridge = C.ridgeEnd({ run, angle: r.angle, h: r.h, type, ridgeT: sl.end === "ledger" ? 0 : num(p.ridgeT, 50), beamW: num(p.beamW, 150),
+      dr: p.dr === "" ? null : num(p.dr, null), d: r.d, plate: num(p.plate, 150), over: num(p.over, 0) });
     const xmin = -r.lenOver, xmax = Math.max(...ridge.pts.map((q) => q[0]));
     const gab = xmax - xmin;
     const board = C.BOARDS.find((b) => b >= gab + 50) || null;
-    const sp = C.spacing({ length: num(p.length, 10000), step: num(p.step, 600) });
-    return { p, r, ridge, gab, board, sp, run };
+    return { p, r, ridge, gab, board, sp: M.sp, run, M, sl };
   }
   function rafterOut() {
-    const { p, r, ridge, gab, board, sp, run } = rafterCalc();
+    const { p, r, ridge, gab, board, run, M, sl } = rafterCalc();
     $("#bp").innerHTML = blueprintSvg(r, run);
     $("#splice").innerHTML = spliceSvg(r.h);
+    document.querySelectorAll("[data-rshow]").forEach((el) => { el.style.display = el.dataset.rshow.split(" ").includes(p.ridge || "board") ? "" : "none"; });
+    const rn = $("#ridgeName");
+    if (rn) rn.textContent = { prop: "Стропила подпирают конёк", board: "Стропила в стык с коньком", beam: "Стропила опираются на конёк" }[p.ridge || "board"];
     $("#ridgeNote").textContent = ridge.type === "beam"
-      ? "Стропило опирается на коньковый прогон: нижний упор в грань прогона, площадка на прогоне, верхний рез по оси конька — встык с парным стропилом."
-      : "Пара стропил сходится на оси конька резами по отвесу. Стык закрывают накладками с двух сторон или пластинами.";
-    const sl = C.slope({ angle: r.angle });
-    let html = `<div class="card"><h3>Длина стропила</h3><div class="res">
-        <span class="k">Уклон</span><span class="v">${fmt(r.angle, 1)}° · ${fmt(sl.percent)} %</span>
-        <span class="k">H — высота конька над мауэрлатом</span><span class="v">${mm(r.rise)}</span>
+      ? "Конёк под стропилами: гнездо снизу — упор в грань конька, площадка лежит на нём, верхний рез по оси, встык с парным стропилом."
+      : ridge.type === "prop"
+        ? `Пара стропил сходится на оси резами по отвесу, сверху в гнёзда встаёт коньковая доска на ребре. Площадка гнезда — половина толщины доски: ${f0(ridge.seat)} мм.`
+      : ridge.type === "wall" ? ""
+      : ridge.ridgeT > 0
+        ? `Коньковая доска стоит на ребре между стропилами, стропила упираются в неё резом по отвесу. Рез отступает от оси на половину толщины: ${f0(ridge.gap)} мм.`
+        : "Толщина 0: пара стропил сходится на оси конька резами по отвесу, стык закрывают накладками.";
+    const sl0 = C.slope({ angle: r.angle });
+    let html = `<div class="card"><h3>Длина стропила${M.slopes.length > 1 ? ` · ${sl.label.toLowerCase()}` : ""}</h3><div class="res">
+        <span class="k">Уклон</span><span class="v">${fmt(r.angle, 1)}° · ${fmt(sl0.percent)} %</span>
+        <span class="k">${p.form === "shed" && !sl.wing ? "H — перепад высоты стен" : "H — высота конька над мауэрлатом"}</span><span class="v">${mm(r.rise)}</span>
         <hr><span class="k">Габарит доски с резами</span><span class="v big">${mm(gab)}</span>
         <span class="k">Брать доску</span><span class="v">${board ? m(board) : "сращивать"}</span>
         <span class="k">Сечение доски</span><span class="v">${S.paid ? secLabel(p, run, r) : "🔒"}</span>
-        <hr><span class="k">Стропильных пар</span><span class="v">${sp.pairs} (${sp.rafters} шт.)</span>
-        <span class="k">Фактический шаг</span><span class="v">${mm(sp.step)}</span>
+        <hr><span class="k">Стропил такого вида</span><span class="v">${sl.n} шт.</span>
+        <span class="k">Фактический шаг</span><span class="v">${mm(M.sp.step)}</span>
       </div>
       <button class="btn ghost" data-act="sendRafter" type="button">Отправить расчёт в чат</button></div>`;
 
@@ -644,28 +926,50 @@
       <div class="res">
         <span class="k">От торца свеса до запила (по низу)</span><span class="v">${mm(rr.lenOver)}</span>
         <span class="k">Угол торцевых резов к кромке</span><span class="v">${fmt(rr.plumbAngleToEdge, 1)}°</span>
-        <span class="k">Опорный запил: глубина / площадка</span><span class="v">${mm(rr.d)} / ${mm(rr.seat)}</span>
-        ${rg.type === "beam" ? `<span class="k">Запил в коньке: упор / площадка</span><span class="v">${mm(rg.lowerFace)} / ${mm(rg.seat)}</span>` : ""}
+        <span class="k">Опорный запил: глубина поперёк / остаток доски</span><span class="v">${mm(rr.d)} / ${mm(rr.rest)}</span>
+        <span class="k">Отвесный рез / площадка / по кромке</span><span class="v">${f0(rr.plumb)} / ${f0(rr.seat)} / ${mm(rr.along)}</span>
+        ${rg.type === "beam" ? `<span class="k">Гнездо в коньке: упор / площадка</span><span class="v">${mm(rg.lowerFace)} / ${mm(rg.seat)}</span>` : ""}
+        ${rg.type === "prop" ? `<span class="k">Гнездо под конёк: отвес / площадка</span><span class="v">${mm(rg.upperFace)} / ${mm(rg.seat)}</span><span class="k">Рез у оси по отвесу</span><span class="v">${mm(rg.lowerFace)}</span>` : ""}
+        ${rg.type === "wall" ? `<span class="k">Между запилами (по низу)</span><span class="v">${mm(rg.bottomEnd)}</span><span class="k">Свес за верхней стеной</span><span class="v">${mm(rg.overLen)}</span>` : ""}
       </div>
       ${warns.map((w) => `<div class="warn">${w}</div>`).join("")}
       <button class="btn" data-act="jig" type="button">Кондуктор 1:1 для печати (PDF)</button>
       <p class="note">Шаблон печатается на листах A4 в натуральную величину. На последнем листе контрольный квадрат 50 мм: проверьте его линейкой, прежде чем вырезать.</p>`;
     html += `<div class="card">${S.paid ? layout : `<div class="locked-body">${layout}</div>${lockHtml("Разметка и кондуктор", "Развёртка доски со всеми размерами, запилы на мауэрлате и в коньке, шаблон для печати 1:1.")}`}</div>`;
 
-    if (p.form === "hip") {
-      const hp = S.paid ? C.hip({ run, angle: r.angle, over: num(p.over, 0), step: sp.step }) : C.hip({ run: 4000, angle: 35, over: 500, step: 588 });
-      const hipHtml = `<h3>Вальма</h3><div class="res">
+    const hipCard = (title, hp, ang) => `<h3>${title}</h3><div class="res">
           <span class="k">Накосное стропило</span><span class="v">${mm(hp.hipLen)}</span>
           <span class="k">Накосное со свесом</span><span class="v">${mm(hp.hipWithOver)}</span>
           <span class="k">Уклон накосного</span><span class="v">${fmt(hp.hipAngle, 1)}°</span>
           <span class="k">Нарожники короче на</span><span class="v">${mm(hp.decrement)}</span></div>
         <h3 style="margin-top:12px">Нарожники (без свеса / со свесом)</h3>
         ${hp.jacks.map((j) => `<div class="list-row"><span>№ ${j.n}</span><span>${mm(j.len)} / ${mm(j.withOver)}</span></div>`).join("")}
-        <p class="note">Верх нарожника режется двойным углом: по вертикали под уклоном ${fmt(r.angle, 1)}° и в плане под 45°. Накосное стропило делайте спаренным.</p>`;
-      html += `<div class="card">${S.paid ? hipHtml : `<div class="locked-body">${hipHtml}</div>${lockHtml("Вальма", "Длина накосного стропила и нарожников по порядку.")}`}</div>`;
+        <p class="note">Верх нарожника режется двойным углом: по вертикали под уклоном ${fmt(ang, 1)}° и в плане под 45°. Накосное стропило делайте спаренным.</p>`;
+    const lockCard = (inner, sampleInner, t, d) => `<div class="card">${S.paid ? inner : `<div class="locked-body">${sampleInner}</div>${lockHtml(t, d)}`}</div>`;
+    const sampleHip = C.hip({ run: 4000, angle: 35, over: 500, step: 588 });
+    if (p.form === "hip" && !sl.wing) {
+      const hp = C.hip({ run: W2(p), angle: r.angle, over: num(p.over, 0), step: M.sp.step });
+      html += lockCard(hipCard("Вальма", hp, r.angle), hipCard("Вальма", sampleHip, 35), "Вальма", "Длина накосного стропила и нарожников по порядку.");
+    }
+    if (sl.wing && M.ex.valley) {
+      const v2 = C.hip({ run: M.wing.rw, angle: M.wing.angle, over: num(p.over, 0), step: M.sp.step });
+      const valley = `<h3>Ендовы</h3><div class="res">
+          <span class="k">Ендовное стропило со свесом</span><span class="v">${mm(v2.hipWithOver)}</span>
+          <span class="k">Уклон ендовы</span><span class="v">${fmt(v2.hipAngle, 1)}°</span>
+          <span class="k">Ендов</span><span class="v">2 шт., спаренные</span></div>
+        <h3 style="margin-top:12px">Нарожники у ендовы, без свеса</h3>
+        ${v2.jacks.map((j) => `<div class="list-row"><span>№ ${j.n} · 4 шт.</span><span>${mm(j.len)}</span></div>`).join("")}
+        ${M.ex.mainShort.length ? `<h3 style="margin-top:12px">Укороченные стропила основного ската</h3>${M.ex.mainShort.map((q) => `<div class="list-row"><span>${q.n} шт.</span><span>${mm(q.len)}</span></div>`).join("")}` : ""}
+        <p class="note">Ендова считается как накосное стропило с заложением в половину ширины пристройки. Низ нарожников режется двойным углом под ендову.</p>`;
+      html += lockCard(valley, hipCard("Ендовы", sampleHip, 35), "Ендовы", "Длина ендовных стропил, нарожников и укороченных стропил.");
+      if (M.ex.wingHip) {
+        const he = C.hip({ run: M.wing.rw, angle: M.wing.angle, over: num(p.over, 0), step: M.sp.step });
+        html += lockCard(hipCard("Вальма пристройки", he, M.wing.angle), hipCard("Вальма", sampleHip, 35), "Вальма пристройки", "Накосные и нарожники вальмы пристройки.");
+      }
     }
     $("#out").innerHTML = html;
   }
+  const W2 = (p) => num(p.width, 8000) / 2;
 
   /* --- общие примитивы чертежей --- */
   const WH = "#ffffff", WD = "rgba(255,255,255,.55)", INKC = "#1d1d1b", RED = "#e0262b", BLUE = "#1a9be0";
@@ -747,7 +1051,8 @@
       ${tag(330, (P[1] + rb[1]) / 2 + 4, "H", f0(r.rise), "end")}
       ${tag(mt[0] - 6, mt[1] - 10, "A", f0(r.h))}
       ${tag(P[0] + arcR + 44, P[1] + 18, "Q", `${fmt(r.angle, 1)}°`)}
-      ${tag(P[0] - 6, P[1] + 40, "d", f0(r.d), "end")}${ln(P[0] - 8, P[1] + 30, P[0] - 1, P[1] + dS / 2 + 1, 0.8, WH)}
+      ${(() => { const rem = th - dS * cs, Q2 = [P[0] - sn * rem, P[1] - cs * rem];
+        return dimLine(P[0], P[1], Q2[0], Q2[1], "#ffe08a") + tag(Q2[0] - 4, Q2[1] - 8, "R", f0(r.rest), "end"); })()}
       ${tag(P[0] + pw / 2, P[1] + ph + 22, "M", f0(r.plate))}
     </svg>`;
   }
@@ -755,9 +1060,9 @@
   /* --- развёртка доски в стиле чертежей автора: красный контур, голубой габарит, чёрные размеры --- */
   function boardSvg(r, ridge) {
     const a = rad(r.angle), s = Math.sin(a), c = Math.cos(a), t = Math.tan(a);
-    const h = r.h, d = r.d;
+    const h = r.h;
     const E0 = [-r.lenOver, 0], E1 = [-r.lenOver + h * t, h];
-    const V = [0, 0], Pn = [d * s, d * c], Hn = [d / s, 0];
+    const [V, Pn, Hn] = r.geo.notch;
     const RP = ridge.pts;
     const xmin = E0[0], xmax = Math.max(...RP.map((q) => q[0]));
     // по краям — истинный масштаб (углы честные), середина доски сжата
@@ -790,6 +1095,17 @@
         + arrowDim(S2(foot), S2(B3), f0(ridge.full), 34, { side: 1, fs: 24 })
         + arrowDim(S2(B0), S2(foot), f0(ridge.foot), 26, { side: 1, fs: 20, head: 10 })
         + `<line x1="${X(foot[0]).toFixed(1)}" y1="${Y(0).toFixed(1)}" x2="${X(B2[0]).toFixed(1)}" y2="${Y(B2[1]).toFixed(1)}" stroke="${BLUE}" stroke-width="2" stroke-dasharray="5 6"/>`;
+    } else if (ridge.type === "prop") {
+      const [B0, B1, B2, B3] = RP;
+      ridgeDims = arrowDim(S2(B0), S2(B1), f0(ridge.lowerFace), 34, { side: 1, fs: 22 })
+        + arrowDim(S2(B1), S2(B2), f0(ridge.seat), 16, { side: 1, fs: 22, head: 11 })
+        + arrowDim(S2(B2), S2(B3), f0(ridge.upperFace), -22, { side: -1, fs: 22, head: 11 });
+    } else if (ridge.type === "wall") {
+      const [N0, N1, N2, T0, T1] = RP;
+      ridgeDims = arrowDim(S2(N0), S2(N1), f0(ridge.notch.plumb), -22, { side: -1, fs: 22, head: 11 })
+        + arrowDim(S2(N1), S2(N2), f0(ridge.notch.seat), -18, { side: -1, fs: 22, head: 11 })
+        + arrowDim(S2(N2), S2(T0), f0(T0[0] - N2[0]), 40, { side: 1, fs: 22 })
+        + arrowDim(S2(T0), S2(T1), f0(ridge.full), 34, { side: 1, fs: 24 });
     } else {
       ridgeDims = arrowDim(S2(RP[0]), S2(RP[1]), f0(ridge.full), 34, { side: 1, fs: 24 });
     }
@@ -804,10 +1120,10 @@
       ${arrowDim(S2([xmin, h]), S2(E1), f0(h * t), -30, { side: -1, fs: 20, head: 10 })}
       ${arrowDim(S2(E1), S2(plTop), f0(r.lenOver), -30, { side: -1 })}
       ${arrowDim(S2([E1[0] - 6 * c / k, E1[1]]), S2(V), f0(Math.hypot(E1[0], E1[1])), 0, { side: -1, ext: false })}
-      ${arrowDim(S2(V), S2(Pn), f0(d), -22, { side: -1, fs: 22, head: 11 })}
+      ${arrowDim(S2(V), S2(Pn), f0(r.plumb), -22, { side: -1, fs: 22, head: 11 })}
       ${arrowDim(S2(Pn), S2(Hn), f0(r.seat), -18, { side: -1, fs: 22, head: 11 })}
       ${arrowDim(S2(E0), S2(V), f0(r.lenOver), 40, { side: 1 })}
-      ${arrowDim(S2(V), S2(Hn), f0(d / s), 40, { side: 1, fs: 22 })}
+      ${arrowDim(S2(V), S2(Hn), f0(r.along), 40, { side: 1, fs: 22 })}
       ${arrowDim(S2(Hn), S2(RP[0]), f0(RP[0][0] - Hn[0]), 40, { side: 1 })}
       ${arrowDim(S2([xmin, 0]), S2([xmax, 0]), `доска ${f0(xmax - xmin)}`, 100, { side: 1, fs: 28 })}
       ${ridgeDims}
@@ -884,7 +1200,7 @@
       g.fillStyle = "#000"; g.font = `${4.2 * PX}px sans-serif`;
       const lab = toPage(-J.back + 8, r.h * 0.45, i);
       g.fillText(`ОПОРНЫЙ ЗАПИЛ · доска ${r.h} мм`, lab[0], lab[1]);
-      g.fillText(`${fmt(r.angle, 1)}° · d = ${Math.round(r.d)} мм`, lab[0], lab[1] + 6 * PX);
+      g.fillText(`${fmt(r.angle, 1)}° · запил ${Math.round(r.d)} мм поперёк, остаток ${Math.round(r.rest)} мм`, lab[0], lab[1] + 6 * PX);
       const rl = toPage(-J.back + 8, r.h + 8, i);
       g.font = `${3.4 * PX}px sans-serif`; g.fillText("упорная рейка к кромке стропила", rl[0], rl[1]);
       g.restore();
@@ -914,9 +1230,148 @@
       try {
         toast("Отправляю PDF в чат…");
         const b64 = doc.output("datauristring").split(",")[1];
-        const res = await api("sendDoc", { filename: fname, caption: `Кондуктор опорного запила: доска ${r.h} мм, уклон ${fmt(r.angle, 1)}°, запил ${Math.round(r.d)} мм. Печать 100 %.`, data: b64 });
+        const res = await api("sendDoc", { filename: fname, caption: `Кондуктор опорного запила: доска ${r.h} мм, уклон ${fmt(r.angle, 1)}°, запил ${Math.round(r.d)} мм поперёк доски (остаток ${Math.round(r.rest)} мм). Печать 100 %.`, data: b64 });
         if (res.ok) { toast("PDF в чате с ботом"); haptic("medium"); return; }
       } catch (_) { /* упадём на скачивание */ }
+    }
+    doc.save(fname);
+  }
+
+  /* ---------- проект в PDF: исходные данные, план, разметка стропил, детали, балки, материалы ---------- */
+  function svgImage(svg, wPx) {
+    const vb = ((svg.match(/viewBox="([^"]+)"/) || [])[1] || "0 0 1000 600").split(/\s+/).map(Number);
+    const hPx = Math.round((wPx * vb[3]) / vb[2]);
+    const s2 = svg.replace(/^<svg([^>]*?)\sclass="[^"]*"/, "<svg$1").replace("<svg", `<svg width="${wPx}" height="${hPx}"`);
+    return new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res({ im, w: wPx, h: hPx });
+      im.onerror = rej;
+      im.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s2);
+    });
+  }
+  async function projectPdf() {
+    if (!S.paid) return buy();
+    if (!window.jspdf) return toast("Не загрузилась библиотека PDF. Проверьте интернет.");
+    toast("Собираю PDF проекта…");
+    const p = P(), mc = mapCalc(p), M = mc.M, e = estimateCalc(p), mat = materialOf(p);
+    const PX = 6, PW = 210, PH = 297, MX = 14, bottom = PH - 16, CW = PW - 2 * MX;
+    const pages = [];
+    let cv, g, y;
+    const font = (sz, w = 400) => `${w} ${sz * PX}px -apple-system, "Segoe UI", Roboto, Arial, sans-serif`;
+    const newPage = () => {
+      cv = document.createElement("canvas"); cv.width = PW * PX; cv.height = PH * PX;
+      g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+      pages.push(cv); y = 16;
+    };
+    const text = (t, x, yy, sz, opt = {}) => {
+      g.font = font(sz, opt.w || 400); g.fillStyle = opt.c || "#1d1d1b"; g.textAlign = opt.a || "left";
+      g.fillText(String(t), x * PX, yy * PX);
+    };
+    const wrap = (t, maxMm, sz) => {
+      g.font = font(sz); const words = String(t).split(" "); const lines = []; let cur = "";
+      for (const w of words) { const s2 = cur ? cur + " " + w : w; if (g.measureText(s2).width / PX > maxMm && cur) { lines.push(cur); cur = w; } else cur = s2; }
+      if (cur) lines.push(cur); return lines;
+    };
+    const hline = (yy, c = "#d9d5cc", w = 0.25) => { g.strokeStyle = c; g.lineWidth = w * PX; g.beginPath(); g.moveTo(MX * PX, yy * PX); g.lineTo((PW - MX) * PX, yy * PX); g.stroke(); };
+    const need = (h) => { if (y + h > bottom) newPage(); };
+    const h1 = (t) => { need(30); text(t, MX, y + 6, 6, { w: 800 }); y += 12; };
+    const h2 = (t) => { need(24); text(t.toUpperCase(), MX, y + 4, 3.3, { w: 700, c: "#b8322a" }); y += 6; hline(y, "#1d1d1b", 0.35); y += 5; };
+    const kv = (k, v) => { need(6); text(k, MX, y, 3.4, { c: "#555" }); text(v, PW - MX, y, 3.4, { a: "right", w: 600 }); y += 5.6; };
+    const note = (t) => { wrap(t, CW, 2.9).forEach((l) => { need(5); text(l, MX, y, 2.9, { c: "#777" }); y += 4.2; }); };
+    const img = async (svg, minMm = 80) => {             // не влезает — уменьшаем под остаток листа, если его хватает
+      const { im, h } = await svgImage(svg, CW * PX);
+      let hMm = h / PX, wMm = CW;
+      const fit = () => { const av = bottom - y; if (hMm > av) { wMm *= av / hMm; hMm = av; } };
+      if (hMm > bottom - y) { if (bottom - y < minMm) newPage(); fit(); }
+      g.drawImage(im, (MX + (CW - wMm) / 2) * PX, y * PX, wMm * PX, hMm * PX); y += hMm + 4;
+    };
+    const row = (cells, opt = {}) => {                     // таблица: название | шт. | длина | доска
+      const lines = wrap(cells[0], 96, 3.3), sub = cells[4] ? wrap(cells[4], 96, 2.7) : [];
+      const hR = 1.5 + lines.length * 4.3 + sub.length * 3.4 + 1.2;
+      need(hR);
+      let yy = y + 4;
+      lines.forEach((l) => { text(l, MX, yy, 3.3, { w: opt.head ? 700 : 400, c: opt.head ? "#888" : "#1d1d1b" }); yy += 4.3; });
+      sub.forEach((l) => { text(l, MX, yy - 0.6, 2.7, { c: "#888" }); yy += 3.4; });
+      text(cells[1], 128, y + 4, 3.3, { a: "right", w: opt.head ? 700 : 600, c: opt.head ? "#888" : "#1d1d1b" });
+      text(cells[2], 158, y + 4, 3.3, { a: "right", c: opt.head ? "#888" : "#1d1d1b" });
+      text(cells[3], PW - MX, y + 4, 3.3, { a: "right", c: opt.head ? "#888" : "#1d1d1b" });
+      y += hR; hline(y);
+    };
+    const boxName = { gas: "газобетон / пеноблок", brick: "кирпич", timber: "брус / бревно", frame: "каркас" }[p.box] || "";
+    const formLabel = FORMS.find((f) => f[0] === (p.form || "gable"))[1];
+    const r0 = rafterCalc(false, p, M.slopes[0].key);
+    const ridgeName = p.form === "shed" ? "нет, верх на стене" : r0.ridge.type === "prop" ? `стропила подпирают конёк ${f0(r0.ridge.ridgeT)} мм` : r0.ridge.type === "beam" ? "стропила опираются на конёк"
+      : r0.ridge.ridgeT > 0 ? `в стык коньковой доске ${f0(r0.ridge.ridgeT)} мм` : "пара встык на оси";
+
+    newPage();
+    text("Проект крыши", MX, y + 7, 7.5, { w: 800 }); y += 14;
+    text(`${p.name} · ${new Date().toLocaleDateString("ru-RU")} · «Крыша без переделок»`, MX, y, 3.6, { c: "#555" }); y += 9;
+    h2("Исходные данные");
+    kv("Дом по наружным граням", `${fmt(mc.W / 1000, 2)} × ${fmt(mc.L / 1000, 2)} м`);
+    kv("Стены", boxName);
+    kv("Форма крыши", formLabel + (M.form === "gable" && Math.abs(M.shift) > 0 ? `, конёк смещён на ${f0(Math.abs(M.shift))} мм` : ""));
+    if (M.wing) kv("Пристройка", `${M.wing.side === "front" ? "спереди" : "сзади"}, ${{ gable: "двускатная", hip: "с вальмой", shed: "навес" }[M.wing.form]}, ${fmt(M.wing.w / 1000, 2)} × ${fmt(M.wing.depth / 1000, 2)} м`);
+    kv(p.form === "shed" ? "Перепад высоты стен" : "Высота конька над мауэрлатом", mm(heightOf(p)));
+    M.slopes.forEach((s) => kv(`Уклон: ${s.label.toLowerCase()}`, `${fmt(s.angle, 1)}°`));
+    kv("Свес по горизонтали", mm(mc.over));
+    kv("Кровля", mat.t);
+    kv("Шаг стропил", mm(M.sp.step));
+    kv("Сечение стропил", mc.sec.label);
+    kv("Конёк", ridgeName);
+    kv("Площадь кровли по скатам", `${fmt(e.area, 1)} м²`);
+    y += 3;
+    need(90); h2("План крыши");
+    await img(planSvg(p, M, { layer: "rafters" }));
+    M.warnings.forEach((w) => note("Внимание: " + w));
+
+    newPage();
+    h1("Разметка стропил");
+    for (const sl of M.slopes) {
+      const rc = rafterCalc(false, p, sl.key);
+      h2(`${sl.label} · ${sl.n} шт.`);
+      await img(boardSvg(rc.r, rc.ridge));
+      kv("Габарит доски с резами", mm(rc.gab));
+      kv("Брать доску", rc.board ? m(rc.board) : "сращивать");
+      kv("Уклон / угол резов к кромке", `${fmt(rc.r.angle, 1)}° / ${fmt(rc.r.plumbAngleToEdge, 1)}°`);
+      kv("Опорный запил: глубина поперёк / остаток", `${mm(rc.r.d)} / ${mm(rc.r.rest)}`);
+      kv("Отвесный рез / площадка / по кромке", `${f0(rc.r.plumb)} / ${f0(rc.r.seat)} / ${mm(rc.r.along)}`);
+      if (rc.ridge.type === "beam") kv("Гнездо в коньке: упор / площадка", `${mm(rc.ridge.lowerFace)} / ${mm(rc.ridge.seat)}`);
+      if (rc.ridge.type === "prop") kv("Гнездо под конёк: отвес / площадка; рез у оси", `${mm(rc.ridge.upperFace)} / ${mm(rc.ridge.seat)}; ${mm(rc.ridge.lowerFace)}`);
+      y += 4;
+    }
+    note("Все запилы размечайте по кондуктору: вкладка «Стропила» → «Кондуктор 1:1 для печати».");
+
+    newPage();
+    h1("Детали и балки");
+    h2("Стропильная система");
+    row(["Деталь", "Шт.", "Длина, мм", "Доска / сечение"], { head: true });
+    mc.parts.forEach((q) => row([q.name, String(q.n), f0(q.len), `${q.board ? fmt(q.board / 1000, 1) + " м · " : q.len > 6000 ? "сращивать · " : ""}${q.sec}`, q.note]));
+    y += 2; kv("Лес всего (+10 % запас)", `${fmt(mc.total, 2)} м³`); y += 4;
+    need(90); h2(`Балки перекрытия · ${p.attic === "cold" ? "холодный чердак" : "мансарда"}`);
+    await img(planSvg(p, M, { layer: "beams", beams: mc.beams }));
+    row(["Деталь", "Шт.", "Длина, мм", "Сечение"], { head: true });
+    mc.beams.list.forEach((q) => row([q.name, String(q.n), f0(q.len), q.sec || "нужна опора", `шаг ${f0(q.step)} мм${q.half ? `; с опорой посередине ${q.half}` : ""}`]));
+
+    newPage();
+    h1("Материалы");
+    note("Количество посчитано по размерам крыши с типовым запасом. Сверьте нормы расхода с инструкцией производителя.");
+    y += 3;
+    for (const grp of e.groups) {
+      h2(grp.group);
+      grp.items.forEach((it) => row([it.name, Number.isInteger(it.qty) ? f0(it.qty) : fmt(it.qty, 2), "", it.unit, it.note]));
+      y += 3;
+    }
+    pages.forEach((c, i) => { g = c.getContext("2d"); text(`Крыша без переделок · проект «${p.name}» · лист ${i + 1} из ${pages.length}`, PW / 2, PH - 7, 2.6, { c: "#999", a: "center" }); });
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    pages.forEach((c, i) => { if (i) doc.addPage(); doc.addImage(c.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, PW, PH, undefined, "FAST"); });
+    const fname = `proekt_${(p.name || "krysha").replace(/[^\wа-яё]+/gi, "_")}.pdf`;
+    if (CFG.API_URL && tg) {
+      try {
+        toast("Отправляю PDF в чат…");
+        const res = await api("sendDoc", { filename: fname, caption: `Проект крыши: ${p.name}. План, стропила, детали, балки, материалы.`, data: doc.output("datauristring").split(",")[1] });
+        if (res.ok) { toast("Проект в чате с ботом"); haptic("medium"); return; }
+      } catch (_) { /* скачаем файлом */ }
     }
     doc.save(fname);
   }
@@ -969,7 +1424,7 @@
     const bg = document.createElement("div");
     bg.className = "sheet-bg";
     bg.innerHTML = `<div class="sheet"><h3>Проекты</h3>
-      ${S.projects.map((p) => `<div class="cl-item" data-id="${p.id}"><div class="t">${p.name || "Без названия"}<small>${fmt(p.width / 1000, 1)} × ${fmt(p.length / 1000, 1)} м · ${p.form === "hip" ? "вальмовая" : "двускатная"}</small></div>${p.id === S.cur ? "✓" : ""}</div>`).join("")}
+      ${S.projects.map((p) => `<div class="cl-item" data-id="${p.id}"><div class="t">${p.name || "Без названия"}<small>${fmt(p.width / 1000, 1)} × ${fmt(p.length / 1000, 1)} м · ${formName(p)}${wingOf(p) ? " с пристройкой" : ""}</small></div>${p.id === S.cur ? "✓" : ""}</div>`).join("")}
       <button class="btn" data-sheet="new" type="button">Новый проект</button>
       ${S.projects.length > 1 ? `<button class="btn ghost" data-sheet="del" type="button">Удалить текущий</button>` : ""}</div>`;
     document.body.appendChild(bg);
@@ -1018,12 +1473,14 @@
     } catch (_) { toast("Не удалось проверить код"); }
   }
   async function sendRafter() {
-    const { p, r, sp, ridge, gab, board } = rafterCalc();
-    const text = `Стропила · ${p.name}\nШирина ${fmt(p.width)} мм, уклон ${fmt(r.angle, 1)}°, свес ${fmt(p.over)} мм\n` +
+    const { p, r, sp, ridge, gab, board, sl, M } = rafterCalc();
+    const text = `Стропила · ${p.name}${M.slopes.length > 1 ? ` · ${sl.label.toLowerCase()}` : ""}\nЗаложение ${fmt(sl.run)} мм, уклон ${fmt(r.angle, 1)}°, свес ${fmt(p.over)} мм\n` +
       `Высота конька: ${fmt(r.rise)} мм\nДлина до конька: ${fmt(r.lenRidge)} мм\nГабарит доски с резами: ${fmt(gab)} мм\n` +
-      `Доска: ${board ? fmt(board / 1000, 1) + " м" : "сращивать"}\nПар: ${sp.pairs} (${sp.rafters} шт.), шаг ${fmt(sp.step)} мм` +
-      (S.paid ? `\nЗапил: ${fmt(r.d)} мм, площадка ${fmt(r.seat)} мм, рез ${fmt(r.plumbAngleToEdge, 1)}° к кромке` +
-        (ridge.type === "beam" ? `\nКонёк на прогон: упор ${fmt(ridge.lowerFace)} мм, площадка ${fmt(ridge.seat)} мм` : "\nКонёк: встык по отвесу") : "");
+      `Доска: ${board ? fmt(board / 1000, 1) + " м" : "сращивать"}\nСтропил такого вида: ${sl.n} шт., шаг ${fmt(sp.step)} мм` +
+      (S.paid ? `\nЗапил: ${fmt(r.d)} мм поперёк доски, остаток ${fmt(r.rest)} мм; отвес ${fmt(r.plumb)}, площадка ${fmt(r.seat)}, по кромке ${fmt(r.along)} мм; рез ${fmt(r.plumbAngleToEdge, 1)}° к кромке` +
+        (ridge.type === "beam" ? `\nСтропила опираются на конёк: упор ${fmt(ridge.lowerFace)} мм, площадка ${fmt(ridge.seat)} мм`
+          : ridge.type === "prop" ? `\nСтропила подпирают конёк ${fmt(ridge.ridgeT)} мм: гнездо ${fmt(ridge.upperFace)} × ${fmt(ridge.seat)} мм, рез у оси ${fmt(ridge.lowerFace)} мм`
+          : ridge.ridgeT > 0 ? `\nВ стык коньковой доске ${fmt(ridge.ridgeT)} мм: рез по отвесу в ${fmt(ridge.gap)} мм от оси` : "\nКонёк: пара встык по отвесу на оси") : "");
     if (CFG.API_URL && tg) {
       try { const res = await api("sendText", { text }); if (res.ok) return toast("Отправлено в чат"); } catch (_) {}
     }
@@ -1032,7 +1489,7 @@
 
   async function sendMap() {
     const p = P(), m = mapCalc(p);
-    const text = `Карта стропил · ${p.name}\n${p.form === "hip" ? "Вальмовая" : "Двускатная"}, ${fmt(m.W)}×${fmt(m.L)} мм, уклон ${fmt(m.r.angle, 1)}°, шаг ${fmt(m.sp.step)} мм\n\n` +
+    const text = `Карта стропил · ${p.name}\n${formName(p)}${m.M.wing ? " с пристройкой" : ""}, ${fmt(m.W)}×${fmt(m.L)} мм, уклон ${m.M.slopes.map((s) => fmt(s.angle, 1) + "°").join(" / ")}, шаг ${fmt(m.sp.step)} мм\n\n` +
       m.parts.map((q) => `${q.name}: ${q.n} шт. × ${fmt(q.len)} мм${q.board ? ` (доска ${fmt(q.board / 1000, 1)} м)` : ""}, ${q.sec}`).join("\n") +
       `\n\nЛес всего: ${fmt(m.total, 2)} м³ (+10 % запас)`;
     if (CFG.API_URL && tg) {
@@ -1054,6 +1511,7 @@
     if (a === "sendMap") sendMap();
     if (a === "sendEst") sendEst();
     if (a === "printEst") printEst();
+    if (a === "projPdf") projectPdf();
     if (a === "book") tg ? tg.openLink(CFG.BOOK_URL) : window.open(CFG.BOOK_URL);
     if (a === "author") tg ? tg.openTelegramLink("https://t.me/" + CFG.AUTHOR_CONTACT.replace("@", "")) : 0;
     if (a === "demo") { try { localStorage.setItem("demoPaid", S.paid ? "0" : "1"); } catch (_) {} checkAccess().then(render); }
@@ -1082,6 +1540,12 @@
     S.projects.forEach((p) => {
       if (p.height == null || p.height === "") p.height = Math.round(heightOf(p));
       if (!p.material) p.material = p.roof === "heavy" ? "cpc" : "metal";
+      if (p.notchV !== 2) {                 // раньше d был высотой отвесного реза, теперь глубина поперёк доски
+        if (p.d !== "" && p.d != null) p.d = Math.round(p.d * Math.cos(rad(angleOf(p))));
+        if (!p.ridge || p.ridge === "butt") { p.ridge = "board"; p.ridgeT = 0; }
+        p.notchV = 2;
+        save();
+      }
     });
     S.cur = (await store.get("current")) || S.projects[0].id;
     if (!S.projects.find((p) => p.id === S.cur)) S.cur = S.projects[0].id;

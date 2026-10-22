@@ -14,34 +14,41 @@
     return { angle: a, percent: t * 100, tg: t, k_len: 1 / Math.cos(rad(a)), rise: run ? run * t : null };
   }
 
+  /* Опорный запил с глубиной d поперёк доски: отвесный рез, горизонтальная площадка, длина выреза по кромке.
+     Координаты доски: x вдоль нижней кромки от начала запила, y вверх. */
+  function notchOf(d, angle) {
+    const a = rad(angle), s = Math.sin(a), c = Math.cos(a);
+    const plumb = d / c, seat = d / s, along = d / (s * c);
+    return { plumb, seat, along, pts: [[0, 0], [plumb * s, d], [along, 0]] };
+  }
+
   /* Стропило двускатной крыши.
      run — заложение (от наружной грани мауэрлата до оси конька), over — свес по горизонтали,
-     h — высота доски, d — глубина запила, plate — ширина мауэрлата, ridgeGap — отступ от оси (половина прогона и т.п.) */
+     h — высота доски, d — глубина запила поперёк доски (остаток над запилом h − d), plate — ширина мауэрлата */
   function rafter({ run, angle, over = 0, h = 200, d = null, plate = 150, ridgeGap = 0 }) {
-    const a = rad(angle), s = Math.sin(a), c = Math.cos(a), t = Math.tan(a);
+    const a = rad(angle), t = Math.tan(a), c = Math.cos(a);
     if (d == null) d = Math.round(h / 4);
     const rise = run * t;
-    const lenRidge = (run - ridgeGap) / c;          // по нижней кромке от вертикали запила до конькового реза
+    const lenRidge = (run - ridgeGap) / c;          // от вертикали запила до конькового реза, вдоль доски
     const lenOver = over / c;
     const lenBottom = lenRidge + lenOver;
-    const lenTop = lenBottom;                          // резы параллельны, длины кромок равны
     const boardLen = lenBottom + h * t;               // габарит доски: смещение резов по высоте
-    const seat = d / t;                                // горизонтальная площадка запила
+    const n = notchOf(d, angle);
+    const seat = n.seat;                               // горизонтальная площадка запила
     const need = boardLen + 50;
     const board = BOARDS.find((b) => b >= need) || null;
     const warnings = [];
     if (d > h / 3 + 0.5) warnings.push("Запил глубже трети доски. Уменьшите глубину или подшейте опорный брусок.");
     if (seat > plate) warnings.push(`Площадка запила ${Math.round(seat)} мм шире мауэрлата ${plate} мм. Уменьшите глубину запила.`);
     if (!board) warnings.push("Длиннее 6 м: стропило придётся сращивать у опоры (глава 7.5).");
-    // точки для чертежа в координатах доски: x вдоль нижней кромки (0 = вертикаль запила), y вверх от нижней кромки
     const geo = {
-      notch: [[0, 0], [d * s, d * c], [d / s, 0]],
+      notch: n.pts,
       eave: [[-lenOver, 0], [-lenOver + h * t, h]],
       ridge: [[lenRidge, 0], [lenRidge + h * t, h]],
     };
     return {
       angle, run, over, h, d, plate,
-      rise, ridgeOverPlate: rise - d,
+      rise, rest: h - d, plumb: n.plumb, along: n.along,
       lenRidge, lenOver, lenBottom, boardLen, board, seat,
       plumbAngleToEdge: 90 - angle, seatAngleToEdge: angle,
       dMax: Math.floor(h / 3), warnings, geo,
@@ -49,13 +56,36 @@
   }
 
   /* Конец стропила у конька. Координаты доски: x вдоль нижней кромки (0 = вертикаль опорного запила), y вверх.
-     type: "butt" — рез по отвесу на оси конька (встык);
-           "beam" — запил на коньковый прогон: нижний упор по грани прогона, горизонтальная площадка, верхний рез по оси. */
-  function ridgeEnd({ run, angle, h, type = "butt", beamW = 150, dr = null }) {
+     type: "board" — рез по отвесу в стык коньковой доске толщиной ridgeT (0 — пара стропил встык на оси);
+           "beam" — стропила лежат на коньковой доске (прогоне): нижний упор по её грани, площадка, верхний рез по оси. */
+  function ridgeEnd({ run, angle, h, type = "board", beamW = 150, dr = null, ridgeT = 50, d = null, plate = 150, over = 0 }) {
     const a = rad(angle), s = Math.sin(a), c = Math.cos(a), t = Math.tan(a);
-    const tAxis = run / c;
+    if (type === "wall") {              // односкатная: второй запил на верхней стене (run — между отвесами запилов) и свес за ней
+      const n = notchOf(d == null ? Math.round(h / 4) : d, angle);
+      const xN = run / c, xT = (run + plate + over) / c;
+      return { type: "wall", pts: [[xN, 0], [xN + n.pts[1][0], n.pts[1][1]], [xN + n.along, 0], [xT, 0], [xT + h * t, h]],
+        full: h / c, bottomEnd: xN, topEnd: xT + h * t, notch: n, overLen: over / c, warnings: [] };
+    }
+    if (type === "prop") {            // стропила подпирают конёк: рез по отвесу на оси, сверху гнездо под коньковую доску на ребре
+      const half = Math.max(0, Number(ridgeT) || 0) / 2;
+      if (dr == null || dr === "") dr = Math.round(h / 4);
+      const tAxis = run / c;
+      const B0 = [tAxis, 0];
+      const u = (h - dr * c - half * s) / c;               // отвес у оси: от нижней кромки до площадки гнезда
+      const B1 = [tAxis + u * s, u * c];
+      const B2 = [B1[0] - half * c, B1[1] + half * s];      // площадка гнезда к грани доски
+      const B3 = [B2[0] + dr * s, h];                       // отвес по грани доски до верхней кромки
+      const warnings = [];
+      if (half * 2 < 25) warnings.push("Коньковая доска тоньше 25 мм: гнездо не получится.");
+      if (u * c < h / 2) warnings.push("Гнездо под конёк слишком глубокое: у оси остаётся меньше половины доски.");
+      return { type: "prop", pts: [B0, B1, B2, B3], dr, seat: half, ridgeT: half * 2, lowerFace: u, upperFace: dr, full: h / c,
+        bottomEnd: tAxis, topEnd: B3[0], warnings };
+    }
     if (type !== "beam") {
-      return { type: "butt", pts: [[tAxis, 0], [tAxis + h * t, h]], full: h / c, bottomEnd: tAxis, topEnd: tAxis + h * t, warnings: [] };
+      const gap = type === "butt" ? 0 : Math.max(0, Number(ridgeT) || 0) / 2;
+      const tCut = (run - gap) / c;
+      const warnings = gap * 2 > 0 && gap * 2 < 25 ? ["Коньковая доска тоньше 25 мм: стропилам не во что упереться."] : [];
+      return { type: "board", gap, ridgeT: gap * 2, pts: [[tCut, 0], [tCut + h * t, h]], full: h / c, bottomEnd: tCut, topEnd: tCut + h * t, warnings };
     }
     const half = beamW / 2;
     const minDr = half * t;                               // мельче нельзя: площадка уйдёт ниже кромки
@@ -86,19 +116,21 @@
   };
   function estimate(o) {
     const { W, L, angle, over = 500, form = "gable", material = "metal", step = 600, rafters, rafterLenTotal,
-      hipLenTotal = 0, ridgeType = "butt", box = "gas", insulate = false, wallH = 3000, splices = 0, pairs } = o;
+      hipLenTotal = 0, ridgeType = "butt", box = "gas", insulate = false, wallH = 3000, splices = 0, pairs, geo = null, wing = false } = o;
     const a = rad(angle), cs = Math.cos(a);
     const m = (x) => x / 1000;
     const Wo = W + 2 * over, Lo = L + 2 * over;
-    const area = (m(Wo) * m(Lo)) / cs;                                 // м² кровли по скатам
-    const Ls = m((W / 2 + over) / cs);                                 // длина ската по стропилу, м
     const hip = form === "hip";
-    const eave = hip ? 2 * m(Lo) + 2 * m(Wo) : 2 * m(Lo);             // карниз, м
-    const gableEdge = hip ? 0 : 4 * Ls;                                // фронтонные кромки, м
-    const ridge = hip ? Math.max(m(L - W), 0) : m(Lo);                 // конёк, м
-    const hips = m(hipLenTotal);                                       // рёбра вальм, м
+    const area = geo ? geo.area : (m(Wo) * m(Lo)) / cs;                 // м² кровли по скатам
+    const Ls = geo ? geo.Ls : m((W / 2 + over) / cs);                   // длина ската по стропилу, м
+    const eave = geo ? geo.eave : hip ? 2 * m(Lo) + 2 * m(Wo) : 2 * m(Lo);   // карниз, м
+    const gableEdge = geo ? geo.rake : hip ? 0 : 4 * Ls;                // фронтонные кромки, м
+    const ridge = geo ? geo.ridge : hip ? Math.max(m(L - W), 0) : m(Lo);     // конёк, м
+    const hips = geo ? geo.hips : m(hipLenTotal);                       // рёбра вальм, м
+    const valleys = geo ? geo.valleys : 0, wallJoint = geo ? geo.wallJoint : 0;
+    const complex = hip || wing || valleys > 0;
     const cov = COVER[material] || COVER.metal;
-    const waste = hip ? 1.2 : 1.08;
+    const waste = complex ? 1.2 : 1.08;
     const ceil = Math.ceil, r2 = (x) => Math.round(x * 100) / 100, fr = (x) => String(r2(x)).replace(".", ",");
     const g = [];
     const add = (group, key, name, qty, unit, note = "") => {
@@ -134,7 +166,12 @@
     }
     add("Доборные элементы", "eaveStrip", "Карнизная планка", ceil(eave / 1.9), "шт. по 2 м");
     add("Доборные элементы", "drip", "Капельник", ceil(eave / 1.9), "шт. по 2 м");
-    if (!hip) add("Доборные элементы", "gableStrip", "Ветровая (торцевая) планка", ceil(gableEdge / 1.9), "шт. по 2 м");
+    if (gableEdge > 0) add("Доборные элементы", "gableStrip", "Ветровая (торцевая) планка", ceil(gableEdge / 1.9), "шт. по 2 м");
+    if (valleys > 0) {
+      if (material === "soft") add("Доборные элементы", "valleyCarpet", "Ендовный ковёр", ceil((valleys * 1.1) / 10), "рулон 10 м", `${fr(valleys)} пог. м ендов`);
+      else add("Доборные элементы", "valleyStrip", "Ендовная планка (нижняя и верхняя)", ceil(valleys / 1.9) * 2, "шт. по 2 м", `${fr(valleys)} пог. м ендов`);
+    }
+    if (wallJoint > 0) add("Доборные элементы", "wallStrip", "Планка примыкания к стене", ceil((wallJoint * 1.1) / 1.9), "шт. по 2 м");
     add("Доборные элементы", "ridgeSeal", "Вентилируемый уплотнитель конька", ceil((ridge + hips) * 1.05), "пог. м");
     // --- пирог
     add("Кровельный пирог", "membrane", "Гидроветрозащитная мембрана", ceil((area * 1.15) / 75), "рулон 75 м²", `${Math.round(area * 1.15)} м² с нахлёстами`);
@@ -153,9 +190,10 @@
     add("Водосток и снегозадержание", "pipe", "Водосточная труба", ceil((pipes * m(wallH) * 1.1) / 3), "шт. по 3 м", `${pipes} стояка по ${m(wallH)} м`);
     add("Водосток и снегозадержание", "elbows", "Колена трубы", pipes * 3, "шт.");
     add("Водосток и снегозадержание", "pipeClamps", "Хомуты трубы", pipes * Math.max(2, ceil(m(wallH) / 1.5)), "шт.");
-    if (hip) add("Водосток и снегозадержание", "corners", "Угловые элементы желоба", 4, "шт.");
-    else add("Водосток и снегозадержание", "caps", "Заглушки желоба", 4, "шт.");
-    const snowLen = hip ? eave : 2 * m(Lo);
+    if (hip) add("Водосток и снегозадержание", "corners", "Угловые элементы желоба", 4 + (valleys > 0 ? 2 : 0), "шт.");
+    else add("Водосток и снегозадержание", "caps", "Заглушки желоба", valleys > 0 ? 4 : form === "shed" ? 2 : 4, "шт.");
+    if (!hip && valleys > 0) add("Водосток и снегозадержание", "innerCorners", "Внутренние углы желоба", 2, "шт.");
+    const snowLen = hip || geo ? eave : 2 * m(Lo);
     add("Водосток и снегозадержание", "snow", "Снегозадержатель трубчатый", ceil(snowLen / 3), "секция 3 м");
     add("Водосток и снегозадержание", "snowBr", "Кронштейны снегозадержателя", ceil(snowLen / 0.9) + 2, "шт.");
     // --- крепёж
@@ -203,13 +241,102 @@
     }
     add("Крепёж", "gutterScrews", "Саморезы для крюков и кронштейнов", (ceil(eave / 0.6) + ceil(snowLen / 0.9) + 4) * 3, "шт.");
     add("Крепёж", "antiseptic", "Антисептик-огнебиозащита", ceil((m(rafterLenTotal) * 0.5 + counterLen * 0.2 + battenLen * 0.25) / 6), "л", "≈ по расходу 250 г/м²");
-    return { area, Ls, eave, ridge, groups: g };
+    return { area, Ls, eave, ridge, valleys, groups: g };
   }
 
   /* Шаг и число стропильных пар по длине дома */
   function spacing({ length, step = 600 }) {
     const intervals = Math.ceil(length / step - 1e-9);
     return { intervals, pairs: intervals + 1, step: length / intervals, rafters: (intervals + 1) * 2 };
+  }
+
+  /* Крыша целиком: основной объём (односкатная, двускатная со смещённым коньком, вальмовая) и пристройка к длинной стене.
+     План: x вдоль дома (0..L), y поперёк (0..W), y = 0 — передняя стена. Длины в мм, в geo — в метрах. */
+  function roofModel(o) {
+    const { W, L, H, form = "gable", over = 0, plate = 150, step = 600 } = o;
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+    const atanDeg = (rise, run) => deg(Math.atan(rise / run));
+    const m = (x) => x / 1000;
+    const warnings = [];
+    const sp = spacing({ length: L, step });
+    const xs = [];
+    for (let i = 0; i <= sp.intervals; i++) xs.push(i * sp.step);
+    const lim = Math.max(0, W / 2 - 500);
+    const shift = form === "gable" ? clamp(Number(o.shift) || 0, -lim, lim) : 0;
+    const slopes = [];
+    if (form === "shed") {
+      const run = W - plate;
+      slopes.push({ key: "main", label: "Стропила", run, angle: atanDeg(H, run), end: "wall", side: "front", n: sp.pairs });
+    } else if (form === "hip") {
+      slopes.push({ key: "main", label: "Стропила", run: W / 2, angle: atanDeg(H, W / 2), end: "ridge", side: "both", n: sp.rafters });
+    } else if (Math.abs(shift) < 1) {
+      slopes.push({ key: "main", label: "Стропила", run: W / 2, angle: atanDeg(H, W / 2), end: "ridge", side: "both", n: sp.rafters });
+    } else {
+      slopes.push({ key: "front", label: "Скат 1 (перед)", run: W / 2 + shift, angle: atanDeg(H, W / 2 + shift), end: "ridge", side: "front", n: sp.pairs });
+      slopes.push({ key: "back", label: "Скат 2 (зад)", run: W / 2 - shift, angle: atanDeg(H, W / 2 - shift), end: "ridge", side: "back", n: sp.pairs });
+    }
+    const slopeOn = (side) => slopes.find((s) => s.side === side || s.side === "both");
+    const Wo = W + 2 * over, Lo = L + 2 * over;
+    const geo = { area: 0, eave: 0, rake: 0, ridge: 0, hips: 0, valleys: 0, wallJoint: 0, Ls: 0 };
+    if (form === "shed") {
+      const a = slopes[0].angle, c = Math.cos(rad(a));
+      geo.area = (m(Wo) * m(Lo)) / c; geo.eave = m(Lo); geo.rake = 2 * m(Wo / c) + m(Lo); geo.Ls = m(Wo / c);
+    } else if (form === "hip") {
+      const a = slopes[0].angle, c = Math.cos(rad(a));
+      geo.area = (m(Wo) * m(Lo)) / c; geo.eave = 2 * m(Lo) + 2 * m(Wo); geo.ridge = Math.max(m(L - W), 0);
+      geo.hips = 4 * m(hip({ run: W / 2, angle: a, over, step: sp.step }).hipWithOver); geo.Ls = m((W / 2 + over) / c);
+    } else {
+      const f = slopeOn("front"), b = slopeOn("back");
+      const lf = (f.run + over) / Math.cos(rad(f.angle)), lb = (b.run + over) / Math.cos(rad(b.angle));
+      geo.area = m(Lo) * (m(lf) + m(lb)); geo.eave = 2 * m(Lo); geo.rake = 2 * (m(lf) + m(lb)); geo.ridge = m(Lo); geo.Ls = m(Math.max(lf, lb));
+    }
+    // пристройка к длинной стене: свой конёк поперёк дома, ендовы на стыке со скатом
+    let wing = null;
+    const ex = { mainShort: [], valley: null, valleyJacks: [], wingHip: null, wingCommon: 0 };
+    if (o.wing && o.wing.on && form !== "shed") {
+      const wg = o.wing, side = wg.side === "back" ? "back" : "front";
+      const ms = slopeOn(side);
+      const w = clamp(Number(wg.w) || 3000, 1000, L), depth = clamp(Number(wg.depth) || 2000, 600, 12000);
+      const xc = clamp(L / 2 + (Number(wg.pos) || 0), w / 2, L - w / 2);
+      const kind = ["gable", "hip", "shed"].includes(wg.form) ? wg.form : "gable";
+      const a = kind === "shed" ? clamp(Number(wg.angle) || 20, 5, 45) : ms.angle;
+      const c = Math.cos(rad(a)), rw = w / 2;
+      wing = { side, w, depth, xc, x1: xc - w / 2, x2: xc + w / 2, form: kind, angle: a, rw, mainRun: ms.run, mainAngle: ms.angle,
+        rise: kind === "shed" ? depth * Math.tan(rad(a)) : rw * Math.tan(rad(a)) };
+      if (kind === "shed") {
+        const wsp = spacing({ length: w, step });
+        slopes.push({ key: "wing", label: "Пристройка (навес)", run: depth, angle: a, end: "ledger", side, n: wsp.pairs, wing: true });
+        geo.area += m(w + 2 * over) * m((depth + over) / c);
+        geo.eave += m(w + 2 * over); geo.rake += 2 * m((depth + over) / c); geo.wallJoint += m(w);
+      } else {
+        if (rw > ms.run - 100) warnings.push("Пристройка шире основного ската: её конёк окажется выше основного. Уменьшите ширину пристройки.");
+        const hipEnd = kind === "hip" && depth > rw;
+        const fullLen = hipEnd ? depth - rw : depth;            // где у пристройки целые пары стропил
+        const nFull = Math.max(0, Math.ceil(fullLen / step - 1e-9));
+        slopes.push({ key: "wing", label: "Пристройка", run: rw, angle: a, end: "ridge", side, n: nFull * 2 + (hipEnd ? 1 : 0), wing: true });
+        const v = hip({ run: rw, angle: a, over, step });
+        ex.valley = { n: 2, len: v.hipWithOver, angle: v.hipAngle };
+        ex.valleyJacks = v.jacks.map((j) => ({ n: 4, len: j.len }));
+        const mc = Math.cos(rad(ms.angle));
+        const inside = xs.filter((x) => x > wing.x1 + 1 && x < wing.x2 - 1);
+        const byLen = {};
+        inside.forEach((x) => { const e = Math.min(x - wing.x1, wing.x2 - x); const len = Math.round((ms.run - e) / mc); byLen[len] = (byLen[len] || 0) + 1; });
+        ex.mainShort = Object.keys(byLen).map(Number).sort((p, q) => q - p).map((len) => ({ len, n: byLen[len] }));
+        slopes.forEach((s) => { if (!s.wing && (s.side === side || s.side === "both")) s.n -= inside.length; });
+        const wAreaPlan = m(w + 2 * over) * m(depth + over) - m(w) * m(over);
+        geo.area += wAreaPlan / c;
+        geo.valleys += 2 * m(v.hipWithOver);
+        geo.eave += 2 * m(depth) - m(w);
+        if (hipEnd) {
+          const he = hip({ run: rw, angle: a, over, step });
+          ex.wingHip = { hips: 2, len: he.hipWithOver, jacks: he.jacks.map((j) => ({ n: 4, len: j.withOver })) };
+          geo.hips += 2 * m(he.hipWithOver); geo.eave += m(w + 2 * over); geo.ridge += m(depth);
+        } else {
+          geo.rake += 2 * m((rw + over) / c); geo.ridge += m(depth + over + rw);
+        }
+      }
+    }
+    return { W, L, H, form, over, shift, ridgeY: W / 2 + shift, sp, xs, slopes, wing, ex, geo, warnings };
   }
 
   /* Вальма под 45° в плане */
@@ -260,10 +387,11 @@
 
   /* Контур кондуктора опорного запила в мм (координаты доски), для печати 1:1 */
   function jigOutline({ angle, h, d, len = 600, lip = 25 }) {
-    const a = rad(angle), s = Math.sin(a), c = Math.cos(a);
+    const a = rad(angle);
     const back = 120;                       // заход шаблона за запил в сторону свеса
+    const n = notchOf(d, angle);
     return {
-      body: [[-back, 0], [0, 0], [d * s, d * c], [d / s, 0], [len, 0], [len, h + lip], [-back, h + lip]],
+      body: [[-back, 0], ...n.pts, [len, 0], [len, h + lip], [-back, h + lip]],
       edgeTop: [[-back, h], [len, h]],      // линия кромки доски: сюда упирается рейка
       rail: [[-back, h], [len, h], [len, h + lip], [-back, h + lip]],
       plumb: [[0, 0], [h * Math.tan(a), h]],
@@ -271,7 +399,7 @@
     };
   }
 
-  const api = { slope, rafter, ridgeEnd, estimate, spacing, hip, rafterSection, beamSection, checkSection, jigOutline, BOARDS };
+  const api = { slope, rafter, notchOf, ridgeEnd, roofModel, estimate, spacing, hip, rafterSection, beamSection, checkSection, jigOutline, BOARDS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.RoofCore = api;
 })(typeof window !== "undefined" ? window : globalThis);
