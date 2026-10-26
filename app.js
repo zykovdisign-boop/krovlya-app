@@ -77,7 +77,7 @@
       let demo = null; try { demo = localStorage.getItem("demoPaid"); } catch (_) {}
       S.paid = q === "1" || demo === "1";
     } else {
-      try { const r = await api("access"); S.paid = !!r.paid; S.until = r.until || null; } catch (_) { /* оставляем как было */ }
+      try { const r = await api("access"); S.paid = !!r.paid; S.until = r.until || null; if (r.plans) S.plans = r.plans; } catch (_) { /* оставляем как было */ }
     }
     const b = $("#accessBadge");
     b.textContent = S.paid ? (S.until ? "доступ до " + untilStr() : "полный доступ") : "бесплатно";
@@ -694,14 +694,15 @@
     v.innerHTML = `<h2>Книга</h2>
       <div class="card book-hero"><div class="book-kicker">Инструкция кровельщика</div>
         <div class="book-title">Крыша без переделок</div>
-        <p>Как самому выбрать, рассчитать и собрать крышу, которую не придётся переделывать. 94 страницы, 36 чертежей узлов, чек-листы на каждый этап.</p>
+        <p>Как самому выбрать, рассчитать и собрать крышу, которую не придётся переделывать. 100 страниц, 37 чертежей узлов, чек-листы на каждый этап.</p>
         ${CFG.BOOK_URL ? `<button class="btn" data-act="book" type="button">Купить книгу</button>` : `<p class="note">Ссылка на покупку появится здесь.</p>`}
       </div>
       <div class="card"><h3>Доступ к приложению</h3>
-        <p>${S.paid ? (S.until ? `Пробный полный доступ до ${untilStr()}. Если приложение пригодилось, расскажите, чего не хватает.` : "У вас полный доступ навсегда. Спасибо!") : "Бесплатно: проект, уклон и длина стропил, план сверху, первый чек-лист, часть советов. Полный доступ открывает разметку доски и кондуктор, карту раскроя, сечения, все чек-листы, советы и чертежи."}</p>
-        ${S.paid ? "" : `<button class="btn" data-act="buy" type="button">Полный доступ за ${CFG.PRICE_STARS || 350} ⭐</button>
-          <p class="note">Купили книгу? Введите код из письма:</p>
-          <input id="code" type="text" placeholder="ROOF-XXXXXX или промокод" autocapitalize="characters">
+        <p>${S.paid ? (S.until ? `Полный доступ до ${new Date(S.until).toLocaleDateString("ru-RU")}. Если приложение пригодилось, расскажите, чего не хватает.` : "У вас полный доступ навсегда. Спасибо!") : "Бесплатно: проект, форма крыши, уклон и длина стропил, план сверху, первый чек-лист, часть советов. Полный доступ открывает разметку доски и кондуктор, карту раскроя и балки, смету, PDF проекта, все чек-листы, советы и чертежи."}</p>
+        ${S.paid && !S.until ? "" : plansHtml(S.paid ? "Продлить доступ" : "Полный доступ")}
+        ${S.paid ? "" : `
+          <p class="note">Есть код или промокод? Введите его:</p>
+          <input id="code" type="text" placeholder="Например, MONTH-XXXXXX" autocapitalize="characters">
           <button class="btn ghost" data-act="redeem" type="button">Активировать код</button>`}
       </div>
       <div class="card"><h3>Содержание</h3>${toc}<div class="list-row"><span>Приложения</span><span style="text-align:right">Словарь, таблицы, бланки, сводный чек-лист</span></div></div>
@@ -1452,10 +1453,31 @@
   }
 
   /* ---------- действия ---------- */
-  async function buy() {
+  /* тарифы: подпись в рублях, оплата звёздами Telegram */
+  function plansList() {
+    return (CFG.PLANS || []).map((pl) => {
+      const srv = (S.plans || []).find((q) => q.k === pl.k);
+      return Object.assign({}, pl, srv ? { stars: srv.stars } : {});
+    });
+  }
+  function plansHtml(title) {
+    return `<div class="plans"><div class="plans-t">${title}</div>${plansList().map((pl) => `<button type="button" class="plan${pl.k === "year" ? " best" : ""}" data-plan="${pl.k}">
+      <span class="plan-n">${pl.t}<small>${pl.note}</small></span><span class="plan-p">${f0(pl.rub)} ₽<small>${f0(pl.stars)} ⭐</small></span></button>`).join("")}
+      <p class="note" style="margin-top:6px">Оплата звёздами Telegram. Срок продлевается от текущего окончания доступа.</p></div>`;
+  }
+  function plansSheet() {
+    const bg = document.createElement("div");
+    bg.className = "sheet-bg";
+    bg.innerHTML = `<div class="sheet"><h3>Полный доступ</h3>${plansHtml(S.paid ? "Продлить доступ" : "Выберите срок")}</div>`;
+    document.body.appendChild(bg);
+    bg.addEventListener("click", (e) => { if (e.target === bg || e.target.closest("[data-plan]")) bg.remove(); });
+  }
+  async function buy(plan) {
+    if (!plan) return plansSheet();
     if (!CFG.API_URL || !tg) { toast("Оплата работает внутри Telegram после подключения бота"); return; }
     try {
-      const r = await api("invoice");
+      const r = await api("invoice", { plan });
+      if (!r.link && r.error) { toast(r.error); return; }
       if (!r.link) throw new Error(r.error || "нет ссылки");
       tg.openInvoice(r.link, async (status) => {
         if (status === "paid") { toast("Оплата прошла, открываю доступ…"); setTimeout(async () => { await checkAccess(); render(); }, 1500); }
@@ -1501,6 +1523,8 @@
   document.addEventListener("click", (e) => {
     const pm = e.target.closest("[data-pm]");
     if (pm) { S.projMode = pm.dataset.pm; freshView(); viewProject(); window.scrollTo(0, 0); return; }
+    const pl = e.target.closest("[data-plan]");
+    if (pl) { buy(pl.dataset.plan); return; }
     const b = e.target.closest("[data-act]");
     if (!b) return;
     const a = b.dataset.act;
