@@ -23,8 +23,8 @@
     id: "p" + uid(), name, mode: "simple", kind: "flat", phases: 1, power: 11, rcdMode: "rcd", relay: true, fireRcd: true, spd: false, meter: false,
     rooms: defaultRooms(), lines: [],
   });
-  const linesOf = (p) => (p.mode === "expert" ? p.lines : C.fromRooms(p.rooms));
-  const S = { projects: [], cur: null, tab: "object", paid: false, until: null, plans: null };
+  const linesOf = (p) => (p.mode === "expert" ? p.lines : C.fromRooms(C.applyPlan(p)));
+  const S = { projects: [], cur: null, tab: "object", roomView: "list", paid: false, until: null, plans: null };
   const P = () => S.projects.find((p) => p.id === S.cur) || S.projects[0];
   let saveT;
   const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { store.set("schit_projects", JSON.stringify(S.projects)); store.set("schit_current", S.cur || ""); }, 300); };
@@ -158,10 +158,12 @@
 
   /* ---------- простой режим: комнаты ---------- */
   const ROOM_ADD = [["kitchen", "Кухня"], ["bath", "Ванная"], ["hall", "Коридор"], ["outdoor", "Улица / гараж"], ["boilerRoom", "Котельная"]];
+  const roomSeg = () => `<div class="seg"><button type="button" data-rv="list" class="${S.roomView === "list" ? "on" : ""}">Список</button><button type="button" data-rv="plan" class="${S.roomView === "plan" ? "on" : ""}">План дома</button></div>`;
   function viewRooms() {
     const p = P();
+    if (S.roomView === "plan") return viewPlan();
     const living = p.rooms.filter((r) => r.type === "room").length;
-    $("#view").innerHTML = `<h2>Комнаты</h2>
+    $("#view").innerHTML = `<h2>Комнаты</h2>${roomSeg()}
       <div class="card"><div class="stepper"><span>Жилых комнат</span>
         <button type="button" data-step="-1" aria-label="Убрать комнату">−</button><b>${living}</b><button type="button" data-step="1" aria-label="Добавить комнату">+</button></div>
         <div class="addrow">${ROOM_ADD.map(([t, n]) => `<button type="button" data-addroom="${t}">+ ${n}</button>`).join("")}</div></div>
@@ -172,6 +174,7 @@
   }
   function roomsOut() {
     const p = P(), r = calc();
+    const fromPlan = Object.fromEntries(C.applyPlan(p).filter((x) => x.rect && p.plan && p.plan.on).map((x) => [x.id, x.dist]));
     $("#roomList").innerHTML = p.rooms.map((rm) => {
       const def = C.ROOMS[rm.type] || C.ROOMS.room;
       const keys = def.on.concat(def.opt).filter((k) => rm.items[k]);
@@ -180,7 +183,8 @@
         <div class="ln-head"><input class="ln-name" data-rk="name" value="${esc(rm.name)}" aria-label="Название комнаты">
           <button class="ln-del" data-delroom="${rm.id}" type="button" aria-label="Удалить комнату">×</button></div>
         <div class="appl">${keys.map((k) => `<button type="button" class="ap ${rm.items[k].on ? "on" : ""}" data-ap="${k}" aria-pressed="${rm.items[k].on}">${C.APPL[k].t}</button>`).join("")}</div>
-        <label class="dist">До щита примерно<input data-rk="dist" type="number" inputmode="numeric" value="${rm.dist}"> м</label>
+        ${fromPlan[rm.id] !== undefined ? `<p class="from-plan">По плану до щита <b>${f1(fromPlan[rm.id])} м</b> <button type="button" data-rv="plan">изменить</button></p>`
+        : `<label class="dist">До щита примерно<input data-rk="dist" type="number" inputmode="numeric" value="${rm.dist}"> м</label>`}
         ${on.length ? `<details class="more"><summary>Уточнить мощность и кабель</summary>${on.map((k) => `<div class="more-row" data-apk="${k}">
           <span>${C.APPL[k].t}</span>
           <input data-apv="p" type="number" inputmode="numeric" placeholder="${C.APPL[k].p} Вт" value="${rm.items[k].p || ""}" aria-label="Мощность, Вт">
@@ -210,37 +214,177 @@
     roomSum(r);
   }
 
+  /* ---------- план дома ---------- */
+  const ROOM_FILL = { room: "#ffffff", kitchen: "#fff8e1", bath: "#e3f2fd", hall: "#f5f5f5", outdoor: "#e8f5e9", boilerRoom: "#fbe9e7" };
+  const CABLE = "#ef6c00";
+  const roomOn = (rm) => Object.keys(rm.items || {}).filter((k) => rm.items[k].on);
+
+  function ensurePlan(p) {
+    if (!p.plan) p.plan = { on: true, shield: null };
+    C.autoLayout(p.rooms);
+    if (!p.plan.shield) {
+      const hall = p.rooms.find((r) => r.type === "hall" && r.rect) || p.rooms.find((r) => r.rect);
+      p.plan.shield = hall ? { x: hall.rect.x, y: Math.round((hall.rect.y + hall.rect.h / 2) * 10) / 10 } : { x: 0, y: 0 };
+    }
+  }
+  // Подпись в комнате: сколько линий и сколько кабеля до щита.
+  function planRooms(p) {
+    const r = calc(), dist = Object.fromEntries(C.applyPlan(Object.assign({}, p, { plan: Object.assign({}, p.plan, { on: true }) })).map((x) => [x.id, x.dist]));
+    return p.rooms.filter((rm) => rm.rect).map((rm) => {
+      const n = r.lines.filter((l) => l.room === rm.name || (l.type === "light" && l.name.split(/[·,]/).map((x) => x.trim()).includes(rm.name))).length;
+      return { id: rm.id, name: rm.name, rect: rm.rect, fill: ROOM_FILL[rm.type] || "#fff",
+        note: n ? `${n} ${plural(n, "линия", "линии", "линий")} · ${f1(dist[rm.id])} м` : "", noteColor: CABLE };
+    });
+  }
+  function planOverlay(p) {
+    return (fs, K) => p.rooms.filter((rm) => rm.rect && roomOn(rm).length).map((rm) => {
+      const pts = C.routePath(rm.rect, p.plan.shield), end = pts[pts.length - 1];
+      return `<polyline points="${pts.map((q) => `${q.x * K},${q.y * K}`).join(" ")}" fill="none" stroke="${CABLE}" stroke-width="${fs * 0.2}" stroke-dasharray="${fs * 0.6} ${fs * 0.3}" stroke-linejoin="round" opacity=".9"/>`
+        + `<circle cx="${end.x * K}" cy="${end.y * K}" r="${fs * 0.35}" fill="${CABLE}"/>`;
+    }).join("");
+  }
+  const shieldPoint = (p) => ({ id: "shield", label: "Щит", color: "#1a2e44",
+    get x() { return p.plan.shield.x; }, set x(v) { p.plan.shield.x = v; },
+    get y() { return p.plan.shield.y; }, set y(v) { p.plan.shield.y = v; } });
+
+  function viewPlan() {
+    const p = P();
+    ensurePlan(p);
+    save();
+    $("#view").innerHTML = `<h2>Комнаты</h2>${roomSeg()}
+      <div class="card">
+        <div class="plan-tools">
+          <button type="button" data-act="planPhoto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8a2 2 0 012-2h2l2-2h6l2 2h2a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><circle cx="12" cy="13" r="3.5"/></svg>По фото плана${S.paid ? "" : " · 🔒"}</button>
+          <button type="button" data-act="planReset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8M3 3v5h5"/></svg>Разложить заново</button>
+        </div>
+        <label class="tgl"><input type="checkbox" data-planon ${p.plan.on ? "checked" : ""}><span>Брать длины кабеля с плана<small>путь по стенам от щита + 1 м подъёма к потолку</small></span></label>
+        <div id="pe"></div>
+        <p class="note">Двигайте комнаты пальцем, размер меняется за синий угол. Точку «Щит» поставьте туда, где он будет висеть.</p>
+        <input type="file" id="planFile" accept="image/*" hidden>
+      </div>
+      <div class="card" id="roomSum"></div>`;
+    PlanEditor.mount($("#pe"), {
+      getRooms: () => planRooms(p),
+      getPoints: () => [shieldPoint(p)],
+      overlay: planOverlay(p),
+      onChange: () => { save(); roomSum(calc()); },
+    });
+    roomSum(calc());
+  }
+
+  // Сжимает фото до 1600 px по длинной стороне: меньше трафика, распознаётся так же.
+  function shrinkPhoto(file) {
+    return new Promise((res, rej) => {
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => {
+        const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        res(c.toDataURL("image/jpeg", 0.85).split(",")[1]);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("img")); };
+      img.src = url;
+    });
+  }
+  const ask = (text) => new Promise((res) => (tg && tg.showConfirm ? tg.showConfirm(text, res) : res(window.confirm(text))));
+
+  async function planFromPhoto(file) {
+    const p = P(), btn = document.querySelector('[data-act="planPhoto"]');
+    const label = btn ? btn.innerHTML : "";
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = "Смотрю план… до минуты"; }
+      const r = await api("planPhoto", { image: await shrinkPhoto(file) });
+      if (!r.ok) return toast(r.error === "unknown action" ? "Распознавание заработает после обновления бота" : r.error || "Не получилось распознать");
+      const rooms = C.roomsFromRecognized(r.rooms);
+      if (!rooms.length) return toast("Не нашёл на фото комнат. Нужен план с размерами");
+      if (!(await ask(`Нашёл ${rooms.length} ${plural(rooms.length, "помещение", "помещения", "помещений")}. Заменить ими текущие комнаты?`))) return;
+      p.rooms = rooms;
+      p.plan = { on: true, shield: null };
+      save(); render(false);
+      toast("Готово. Проверьте размеры, приборы в комнатах и место щита");
+    } catch (_) {
+      toast("Ошибка сети, попробуйте ещё раз");
+    } finally {
+      if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = label; }
+    }
+  }
+
   /* ---------- рисунок щита ---------- */
   const KIND = {
-    in: { fill: "#37474f", ink: "#fff", top: "ВВОД" }, relay: { fill: "#eceff1", ink: "#263238", top: "РЕЛЕ U" }, spd: { fill: "#ede7f6", ink: "#311b92", top: "УЗИП" },
-    fire: { fill: "#fff3e0", ink: "#bf360c", top: "УЗО 100" }, rcd: { fill: "#e3f2fd", ink: "#0d47a1", top: "УЗО 30" }, br: { fill: "#ffffff", ink: "#212121", top: "" },
-    diff: { fill: "#e8f5e9", ink: "#1b5e20", top: "ДИФ" }, meter: { fill: "#fafafa", ink: "#212121", top: "СЧЁТЧИК" },
+    in:    { bg: "#1a2e44", fg: "#fff",    accent: "#4fc3f7", top: "ВВОД" },
+    meter: { bg: "#f5f7fa", fg: "#1a2e44", accent: "#90a4ae", top: "СЧЁТЧИК" },
+    relay: { bg: "#eceff4", fg: "#2c3e50", accent: "#78909c", top: "РЕЛЕ U" },
+    spd:   { bg: "#ede7f6", fg: "#4a148c", accent: "#b39ddb", top: "УЗИП" },
+    fire:  { bg: "#fff3e0", fg: "#bf360c", accent: "#ffab91", top: "ПУЗ" },
+    rcd:   { bg: "#e3f2fd", fg: "#0d47a1", accent: "#64b5f6", top: "УЗО" },
+    br:    { bg: "#ffffff", fg: "#1a2e44", accent: "#b0bec5", top: "" },
+    diff:  { bg: "#e8f5e9", fg: "#1b5e20", accent: "#81c784", top: "ДИФ" },
   };
-  const GROUP = ["#1e88e5", "#43a047", "#fb8c00", "#8e24aa", "#00897b", "#e53935", "#6d4c41", "#3949ab"];
+  const GROUP = ["#1565c0", "#2e7d32", "#ef6c00", "#7b1fa2", "#00796b", "#c62828", "#4e342e", "#283593"];
   function panelSvg(r) {
-    const W = 1000, pad = 30, mw = (W - 2 * pad) / r.box.perRow, mh = 150, rowH = 230, top = 30;
-    const H = top + r.rows.length * rowH + 10;
-    let g = "", grp = 0;
+    const W = 1000, pad = 24, gap = 6;
+    const mw = (W - 2 * pad) / r.box.perRow;
+    const mh = 140, lblZone = 64, rowH = mh + lblZone + 16, topY = 24;
+    const H = topY + r.rows.length * rowH + 8;
+    const defs = `<defs>
+      <linearGradient id="rail" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cdd2d8"/><stop offset=".5" stop-color="#e8ebee"/><stop offset="1" stop-color="#b8bfc6"/></linearGradient>
+      <linearGradient id="toggle" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#546e7a"/><stop offset="1" stop-color="#37474f"/></linearGradient>
+      <linearGradient id="toggleH" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#78909c"/><stop offset="1" stop-color="#546e7a"/></linearGradient>
+      <filter id="ds" x="-4%" y="-4%" width="108%" height="108%"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity=".08"/></filter>
+    </defs>`;
+    let svg = defs, grp = 0;
     r.rows.forEach((row, ri) => {
-      const y = top + ri * rowH;
-      g += `<rect x="${pad - 10}" y="${y + mh / 2 - 12}" width="${W - 2 * pad + 20}" height="24" rx="3" fill="#b0b8bf"/>`;
+      const ry = topY + ri * rowH;
+      svg += `<rect x="${pad - 6}" y="${ry + mh / 2 - 10}" width="${W - 2 * pad + 12}" height="20" rx="2" fill="url(#rail)"/>`;
+      svg += `<line x1="${pad - 6}" y1="${ry + mh / 2}" x2="${W - pad + 6}" y2="${ry + mh / 2}" stroke="#a0a8b0" stroke-width=".6" stroke-dasharray="4 3"/>`;
       let x = pad;
       row.forEach((m) => {
-        const w = m.w * mw - 4, k = KIND[m.kind] || KIND.br;
+        const w = m.w * mw - gap, k = KIND[m.kind] || KIND.br, cx = x + gap / 2 + w / 2;
+        const mx = x + gap / 2, my = ry;
         if (m.kind === "rcd") grp = m.group;
         const gc = m.kind === "rcd" || (m.kind === "br" && m.line && m.line.rcd && r.mode === "rcd") ? GROUP[(grp - 1) % GROUP.length] : null;
-        g += `<rect x="${x + 2}" y="${y}" width="${w}" height="${mh}" rx="6" fill="${k.fill}" stroke="#78909c" stroke-width="1.5"/>`;
-        g += `<rect x="${x + 2 + w / 2 - 9}" y="${y + 58}" width="18" height="34" rx="3" fill="${m.kind === "in" ? "#cfd8dc" : "#455a64"}"/>`;
-        if (k.top) g += `<text x="${x + 2 + w / 2}" y="${y + 24}" font-size="${m.w > 1 ? 17 : 13}" font-weight="700" text-anchor="middle" fill="${k.ink}">${k.top}</text>`;
+        svg += `<rect x="${mx}" y="${my}" width="${w}" height="${mh}" rx="4" fill="${k.bg}" filter="url(#ds)"/>`;
+        if (gc) svg += `<rect x="${mx}" y="${my}" width="3" height="${mh}" rx="1.5" fill="${gc}"/>`;
+        svg += `<rect x="${mx}" y="${my}" width="${w}" height="${mh}" rx="4" fill="none" stroke="${gc || "#c5cdd5"}" stroke-width="${gc ? 1.8 : .8}"/>`;
+        if (k.top) {
+          const tfs = m.w > 2 ? 13 : m.w > 1 ? 11 : 10;
+          svg += `<text x="${cx}" y="${my + 16}" font-size="${tfs}" font-weight="600" text-anchor="middle" fill="${k.fg}" letter-spacing=".8" opacity=".7">${k.top}</text>`;
+        }
+        const tgW = Math.min(18, w * 0.3), tgH = 32, tgX = cx - tgW / 2, tgY = my + mh / 2 - tgH / 2 + 4;
+        svg += `<rect x="${tgX}" y="${tgY}" width="${tgW}" height="${tgH}" rx="2.5" fill="url(#toggle)"/>`;
+        svg += `<rect x="${tgX + 1.5}" y="${tgY + 1.5}" width="${tgW - 3}" height="${tgH * 0.4}" rx="1.5" fill="url(#toggleH)"/>`;
+        svg += `<line x1="${tgX}" y1="${tgY + tgH * 0.45}" x2="${tgX + tgW}" y2="${tgY + tgH * 0.45}" stroke="#263238" stroke-width=".5" opacity=".3"/>`;
         const rating = m.kind === "relay" ? "63А" : m.kind === "spd" ? "II" : m.kind === "meter" ? "" : m.kind === "br" || m.kind === "diff" ? `C${m.A}` : `${m.A}А`;
-        g += `<text x="${x + 2 + w / 2}" y="${y + 128}" font-size="${m.w > 1 ? 24 : 21}" font-weight="800" text-anchor="middle" fill="${k.ink}">${rating}</text>`;
-        if (gc) g += `<rect x="${x + 2}" y="${y + mh + 6}" width="${w}" height="8" rx="3" fill="${gc}"/>`;
-        if (m.n) g += `<text x="${x + 2 + w / 2}" y="${y + mh + 42}" font-size="24" font-weight="800" text-anchor="middle" fill="#263238">${m.n}</text>`;
-        if (m.phase && r.phases === 3 && m.kind !== "in") g += `<text x="${x + 2 + w / 2}" y="${y + mh + 66}" font-size="15" text-anchor="middle" fill="#607d8b">L${m.phase}</text>`;
+        if (rating) {
+          const rfs = m.w > 1 ? 20 : 17;
+          svg += `<text x="${cx}" y="${my + mh - 10}" font-size="${rfs}" font-weight="800" text-anchor="middle" fill="${k.fg}">${rating}</text>`;
+        }
+        const belowY = my + mh + 4;
+        if (m.n) {
+          svg += `<circle cx="${cx}" cy="${belowY + 12}" r="12" fill="#1a2e44"/>`;
+          svg += `<text x="${cx}" y="${belowY + 16.5}" font-size="14" font-weight="700" text-anchor="middle" fill="#fff">${m.n}</text>`;
+        }
+        const lbl = m.line ? m.line.name : m.label || "";
+        if (lbl) {
+          const maxPx = w - 6, fs = m.w > 1 ? 11 : 9.5, lh = fs + 2, lines = [];
+          let cur = "";
+          lbl.split(/\s+/).forEach((wd) => { const t = cur ? cur + " " + wd : wd; if (t.length * fs * 0.52 > maxPx && cur) { lines.push(cur); cur = wd; } else cur = t; });
+          if (cur) lines.push(cur);
+          const ly = belowY + (m.n ? 30 : 6);
+          lines.slice(0, 3).forEach((l, i) => { svg += `<text x="${cx}" y="${ly + i * lh}" font-size="${fs}" text-anchor="middle" fill="#607d8b">${esc(l)}</text>`; });
+        }
+        if (m.phase && r.phases === 3 && m.kind !== "in" && m.kind !== "meter") {
+          const phFill = { 1: "#6d4c41", 2: "#37474f", 3: "#78909c" }[m.phase] || "#607d8b";
+          const phy = belowY + lblZone - 14;
+          svg += `<rect x="${cx - 14}" y="${phy - 10}" width="28" height="14" rx="3" fill="${phFill}" opacity=".15"/>`;
+          svg += `<text x="${cx}" y="${phy}" font-size="10" font-weight="700" text-anchor="middle" fill="${phFill}">L${m.phase}</text>`;
+        }
         x += m.w * mw;
       });
     });
-    return `<svg class="panel" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" role="img" aria-label="Схема щита по модулям">${g}</svg>`;
+    return `<svg class="panel" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Segoe UI',Roboto,Arial,sans-serif" role="img" aria-label="Схема щита по модулям">${svg}</svg>`;
   }
   function legendHtml(r) {
     return `<table class="legend"><tr><th>№</th><th>Линия</th><th>Автомат</th><th>Кабель</th>${r.phases === 3 ? "<th>Фаза</th>" : ""}</tr>
@@ -410,13 +554,15 @@
     if (st) {
       const [k, v] = st.dataset.set.split(":");
       if (k === "mode" && v === "expert" && p.mode !== "expert") {
-        p.lines = C.fromRooms(p.rooms).map((l) => ({ id: uid(), type: l.type, name: l.name, p: l.p, len: l.len, S: l.S || undefined }));
+        p.lines = C.fromRooms(C.applyPlan(p)).map((l) => ({ id: uid(), type: l.type, name: l.name, p: l.p, len: l.len, S: l.S || undefined }));
         toast("Линии собраны из комнат — теперь их можно править");
       }
       p[k] = k === "phases" ? Number(v) : v; save(); render(false); haptic(); return;
     }
     const go = e.target.closest("[data-goto]");
     if (go) { S.tab = go.dataset.goto; render(); return; }
+    const rv = e.target.closest("[data-rv]");
+    if (rv) { S.roomView = rv.dataset.rv; render(); haptic(); return; }
     const stp = e.target.closest("[data-step]");
     if (stp) {
       if (stp.dataset.step === "1") p.rooms.push(C.newRoom("room", `Комната ${p.rooms.filter((r) => r.type === "room").length + 1}`, "r" + uid()));
@@ -437,6 +583,15 @@
     if (!b) return;
     const a = b.dataset.act;
     if (a === "redeem") { const inp = b.parentElement.querySelector("[data-code]"); return redeem(inp && inp.value); }
+    if (a === "planPhoto") {
+      if (!S.paid) { toast("Распознавание по фото — в полном доступе"); S.tab = "object"; render(); return; }
+      if (!CFG.API_URL) { toast("Распознавание по фото работает в приложении из Telegram"); return; }
+      $("#planFile").click(); return;
+    }
+    if (a === "planReset") {
+      if (!(await ask("Разложить комнаты заново? Нарисованный план собьётся."))) return;
+      p.rooms.forEach((r) => { delete r.rect; }); p.plan.shield = null; save(); render(false); return;
+    }
     if (a === "addLine") addLineSheet();
     if (a === "buy") buyPrompt();
     if (a === "stickers") makeStickers();
@@ -469,6 +624,8 @@
   });
   document.addEventListener("change", (e) => {
     const p = P(), el = e.target;
+    if (el.id === "planFile" && el.files && el.files[0]) { planFromPhoto(el.files[0]); el.value = ""; return; }
+    if (el.hasAttribute("data-planon")) { p.plan.on = el.checked; save(); render(false); haptic(); return; }
     if (el.dataset.flag) { p[el.dataset.flag] = el.checked; save(); objOut(); haptic(); return; }
     if (el.hasAttribute("data-lrcd")) { const l = p.lines.find((x) => x.id === el.closest(".ln").dataset.id); l.rcd = el.checked; save(); linesOut(); haptic(); return; }
     if (el.closest(".ln") && el.dataset.lk && el.dataset.lk !== "name") linesOut();

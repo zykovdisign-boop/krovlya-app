@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Сантехник PRO</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css?v=9">
+</head>
+<body>
+  <header class="top">
+    <button class="project-chip" type="button">
+      <span class="chip-label">Объект</span>
+      <span class="chip-name" id="projectName">—</span>
+    </button>
+    <span class="badge" id="accessBadge">бесплатно</span>
+  </header>
+  <main id="view"></main>
+  <nav class="tabs">
+    <button type="button" data-tab="object">
+      <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/></svg>
+      Объект
+    </button>
+    <button type="button" data-tab="rooms">
+      <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      Комнаты
+    </button>
+    <button type="button" data-tab="schema">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Схема
+    </button>
+    <button type="button" data-tab="buy">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
+      Закупка
+    </button>
+    <button type="button" data-tab="tips">
+      <svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>
+      Советы
+    </button>
+  </nav>
+  <div class="toast" id="toast"></div>
+  <script src="config.js?v=9"></script>
+  <script src="core.js?v=9"></script>
+  <script src="plan.js?v=9"></script>
+  <script src="tips.js?v=9"></script>
+  <script src="app.js?v=9"></script>
+</body>
+</html>

@@ -6,13 +6,13 @@
   <title>Щит без ошибок</title>
   <script>
     /* автообновление: если на сервере версия новее, перезагружаемся мимо кэша Telegram */
-    window.APP_VERSION = 1;
+    window.APP_VERSION = 2;
     fetch("version.json?t=" + Date.now(), { cache: "no-store" }).then((r) => r.json()).then((j) => {
       if (j.v > window.APP_VERSION && !location.search.includes("v=" + j.v)) location.replace(location.pathname + "?v=" + j.v + location.hash);
     }).catch(() => {});
   </script>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=1">
+  <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
   <header class="top">
@@ -35,8 +35,9 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="config.js?v=1"></script>
-  <script src="core.js?v=1"></script>
-  <script src="app.js?v=1"></script>
+  <script src="config.js?v=2"></script>
+  <script src="core.js?v=2"></script>
+  <script src="plan.js?v=2"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>

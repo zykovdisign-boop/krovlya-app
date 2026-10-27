@@ -112,10 +112,11 @@
     const mods = [];
     const add = (kind, w, label, extra = {}) => mods.push(Object.assign({ kind, w, label }, extra));
     add("in", phases === 3 ? 3 : 2, `Ввод ${phases === 3 ? "3P" : "2P"} ${inA} А`, { A: inA });
+    if (o.meter) add("meter", phases === 3 ? 7 : 6, "Счётчик");
     if (o.spd) add("spd", phases === 3 ? 4 : 2, "УЗИП");
     if (o.relay !== false) for (let f = 0; f < phases; f++) add("relay", 2, phases === 3 ? `Реле напр. L${f + 1}` : "Реле напряжения");
     if (house && o.fireRcd !== false) add("fire", phases === 3 ? 4 : 2, `УЗО ${up(RCDS, inA) || 63} А 100 мА`, { A: up(RCDS, inA) || 63 });
-    let n = 0;                                            // номера линий — по порядку в щите, слева направо
+    let n = 0;
     if (mode === "rcd") {
       groups.forEach((g, gi) => {
         add("rcd", 2, `УЗО ${g.A} А 30 мА`, { A: g.A, group: gi + 1, phase: g.phase });
@@ -125,7 +126,6 @@
     } else {
       lines.forEach((l) => add(l.rcd ? "diff" : "br", l.rcd ? 2 : 1, l.name, { A: l.A, n: ++n, phase: l.phase, line: l }));
     }
-    if (o.meter) add("meter", phases === 3 ? 7 : 6, "Счётчик");
     const used = mods.reduce((a, m) => a + m.w, 0);
     const need = Math.ceil(used * 1.2);
     const box = BOXES.find(([t]) => t >= need) || BOXES[BOXES.length - 1];
@@ -220,7 +220,59 @@
     return lines.map((l) => (l.type === "light" ? { id: l.id, type: "light", name: "Свет · " + l.rooms.join(", "), p: l.p, len: l.len, S: l.S } : l));
   }
 
-  const api = { line, balance, shield, fromRooms, newRoom, ROOMS, APPL, PRESETS, BREAKERS, CABLE_MAX };
+  /* ---------- план дома ---------- */
+  // Координаты в метрах, шаг 0,1. rect = { x, y, w, h }; p.plan = { on, shield: { x, y } }.
+  const r1 = (v) => Math.round(v * 10) / 10;
+  const AREA = { room: 16, kitchen: 10, bath: 5, hall: 6, outdoor: 20, boilerRoom: 6 };
+
+  // Раскладывает рядами комнаты без прямоугольника, нарисованные не трогает.
+  function autoLayout(rooms) {
+    const placed = rooms.filter((r) => r.rect), todo = rooms.filter((r) => !r.rect);
+    if (!todo.length) return rooms;
+    let y = placed.length ? Math.max(...placed.map((r) => r.rect.y + r.rect.h)) + 0.5 : 0;
+    const total = todo.reduce((a, r) => a + (AREA[r.type] || 12), 0);
+    const rowW = Math.max(6, Math.sqrt(total) * 1.6);
+    let x = 0, rowH = 0;
+    todo.forEach((r) => {
+      const area = AREA[r.type] || 12;
+      const w = r1(Math.max(1.2, Math.sqrt(area * 1.3))), h = r1(Math.max(1.2, area / w));
+      if (x > 0 && x + w > rowW) { x = 0; y = r1(y + rowH); rowH = 0; }
+      r.rect = { x: r1(x), y: r1(y), w, h };
+      x += w; rowH = Math.max(rowH, h);
+    });
+    return rooms;
+  }
+  // Трасса кабеля по стенам: от щита по горизонтали, потом по вертикали до ближайшей точки комнаты.
+  function routePath(rect, from) {
+    const e = { x: Math.min(Math.max(from.x, rect.x), rect.x + rect.w), y: Math.min(Math.max(from.y, rect.y), rect.y + rect.h) };
+    return [{ x: from.x, y: from.y }, { x: e.x, y: from.y }, e];
+  }
+  // До комнаты: путь по трассе + 1 м подъёма от щита к потолку. Разводку внутри комнаты учитывает APPL.add.
+  function cableDist(rect, from) {
+    const p = routePath(rect, from);
+    const len = Math.abs(p[1].x - p[0].x) + Math.abs(p[2].y - p[1].y);
+    return Math.max(1, Math.round((len + 1) * 2) / 2);
+  }
+  // Комнаты с длинами до щита из плана; проект не меняет.
+  function applyPlan(p) {
+    const plan = p.plan;
+    if (!plan || !plan.on || !plan.shield) return p.rooms || [];
+    return (p.rooms || []).map((rm) => (rm.rect ? Object.assign({}, rm, { dist: cableDist(rm.rect, plan.shield) }) : rm));
+  }
+  // Помещения, распознанные по фото (типы сантехнические, общие для ботов), → комнаты электрики.
+  function roomsFromRecognized(list) {
+    const map = { bathroom: "bath", shower: "bath", laundry: "bath", toilet: "hall", kitchen: "kitchen", boiler: "boilerRoom" };
+    return (list || []).filter((r) => r && r.w > 0 && r.h > 0).map((r) => {
+      const name = String(r.name || "").slice(0, 40);
+      const type = map[r.type] || (/коридор|прихож|холл|тамбур|кладов|гардероб/i.test(name) ? "hall" : "room");
+      const rm = newRoom(type, name || ROOMS[type].t);
+      rm.rect = { x: r1(Math.max(0, r.x || 0)), y: r1(Math.max(0, r.y || 0)), w: r1(Math.min(30, r.w)), h: r1(Math.min(30, r.h)) };
+      return rm;
+    });
+  }
+
+  const api = { line, balance, shield, fromRooms, newRoom, ROOMS, APPL, PRESETS, BREAKERS, CABLE_MAX,
+    autoLayout, routePath, cableDist, applyPlan, roomsFromRecognized };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.ShieldCore = api;
 })(typeof window !== "undefined" ? window : globalThis);
