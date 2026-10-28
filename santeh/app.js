@@ -355,8 +355,10 @@
     const hasPlan = p.mode !== "expert" && p.plan && p.plan.on && p.rooms.some((rm) => rm.rect);
     const planPic = hasPlan ? `<h3>План разводки</h3><p class="sub">Синяя — холодная, красная — горячая. Нажмите, чтобы увеличить</p>
       ${PlanEditor.svg({ rooms: planRooms(p, r.heating), points: [riserPoint(p)], overlay: planOverlay(p), cls: "plan-svg static" })}
-      <h3 style="margin-top:16px">Подключение приборов</h3>` : `<p class="sub">Нарисуйте <button type="button" class="linkbtn" data-rv="plan">план дома</button> — длины труб посчитаются по нему, а здесь появится разводка по комнатам.</p>`;
-    const body = (x) => `${planPic}${schemaSvg(x)}
+` : `<p class="sub">Нарисуйте <button type="button" class="linkbtn" data-rv="plan">план дома</button> — длины труб посчитаются по нему, а здесь появится разводка по комнатам.</p>`;
+    const body = (x) => `${planPic}<h3 style="margin-top:16px">Монтажная схема</h3>
+      <p class="sub">Узел ввода, коллекторы с отводами на каждый прибор${r.heating ? ", котёл и радиаторы" : ""}. Нажмите, чтобы увеличить</p>
+      <div class="montage-wrap">${Montage.montageSvg(r, p)}</div>
       <div class="res" style="margin-top:12px">
         <span class="k">Труб ХВС</span><span class="v">${f0(x.coldLen)} м · ${x.coldPipe.t}</span>
         <span class="k">Труб ГВС</span><span class="v">${f0(x.hotLen)} м · ${x.hotPipe.t}</span>
@@ -370,35 +372,6 @@
     $("#view").innerHTML = `<h2>Схема</h2><div class="card">${S.paid ? body(w) : `<div class="locked-body">${body(w)}</div>${lockHtml("Схема разводки", "Схема водоснабжения, отопления и полный список закупки.")}`}</div>`;
   }
 
-  function schemaSvg(w) {
-    const W = 900, pad = 40;
-    const fixtures = w.fixtures;
-    if (!fixtures.length) return `<svg class="schema" viewBox="0 0 ${W} 100" xmlns="http://www.w3.org/2000/svg"><text x="${W / 2}" y="50" text-anchor="middle" fill="#999" font-size="16">Добавьте точки водоразбора</text></svg>`;
-    const cols = Math.min(fixtures.length, 6);
-    const rows = Math.ceil(fixtures.length / cols);
-    const cw = (W - 2 * pad) / cols;
-    const H = pad + rows * 160 + 80;
-    let g = `<defs><linearGradient id="coldG"><stop offset="0" stop-color="#1565c0"/><stop offset="1" stop-color="#42a5f5"/></linearGradient>
-      <linearGradient id="hotG"><stop offset="0" stop-color="#e53935"/><stop offset="1" stop-color="#ff7043"/></linearGradient></defs>`;
-    const coldY = H - 40, hotY = H - 20;
-    g += `<rect x="${pad}" y="${coldY}" width="${W - 2 * pad}" height="8" rx="4" fill="url(#coldG)"/>`;
-    g += `<text x="${pad - 5}" y="${coldY + 7}" font-size="11" text-anchor="end" fill="#1565c0" font-weight="600">ХВС</text>`;
-    g += `<rect x="${pad}" y="${hotY}" width="${W - 2 * pad}" height="8" rx="4" fill="url(#hotG)"/>`;
-    g += `<text x="${pad - 5}" y="${hotY + 7}" font-size="11" text-anchor="end" fill="#e53935" font-weight="600">ГВС</text>`;
-    fixtures.forEach((f, i) => {
-      const col = i % cols, row = Math.floor(i / cols);
-      const cx = pad + col * cw + cw / 2;
-      const cy = pad + row * 160 + 40;
-      const fx = C.FIXTURES[f.type] || C.FIXTURES.sink;
-      g += `<rect x="${cx - 32}" y="${cy - 24}" width="64" height="48" rx="10" fill="#f5f7fa" stroke="#cfd8dc" stroke-width="1.2"/>`;
-      g += `<text x="${cx}" y="${cy + 5}" font-size="22" text-anchor="middle">${fx.icon}</text>`;
-      g += `<text x="${cx}" y="${cy + 36}" font-size="11" text-anchor="middle" fill="#546e7a">${esc(f.name || fx.t)}</text>`;
-      g += `<text x="${cx}" y="${cy + 50}" font-size="10" text-anchor="middle" fill="#90a4ae">${f1(f.q * 60)} л/мин</text>`;
-      g += `<line x1="${cx - 6}" y1="${cy + 24}" x2="${cx - 6}" y2="${coldY}" stroke="#1565c0" stroke-width="2" stroke-dasharray="4 2"/>`;
-      if (fx.hot) g += `<line x1="${cx + 6}" y1="${cy + 24}" x2="${cx + 6}" y2="${hotY}" stroke="#e53935" stroke-width="2" stroke-dasharray="4 2"/>`;
-    });
-    return `<svg class="schema" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">${g}</svg>`;
-  }
 
   /* ---------- вкладка: советы и чертежи ---------- */
   const FREE_TIPS = 6;
@@ -506,7 +479,7 @@
     }
     const rv = e.target.closest("[data-rv]");
     if (rv) { S.roomView = rv.dataset.rv; S.tab = "rooms"; render(); haptic(); return; }
-    const zm = e.target.closest("svg.plan-svg.static, svg.schema");
+    const zm = e.target.closest("svg.plan-svg.static, svg.montage");
     if (zm) { openZoom(zm.outerHTML); return; }
     const stp = e.target.closest("[data-step]");
     if (stp) {
