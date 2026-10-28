@@ -1,7 +1,7 @@
 window.APP_CONFIG = {
   API_URL: "https://script.google.com/macros/s/AKfycbzM9Ct0_1wlZCsJQzm8iMQtBnEJRsBnZZXJKCIdkqxKMR--de2HdtrRBL8hzSs1eR2YAA/exec",
   BOT: "@CAHTEXHIKA_bot",
-  APP_VERSION: 3,
+  APP_VERSION: 11,
   PLANS: {
     month:   { label: "Месяц",    days: 30,  rub: 999,  stars: 600 },
     year:    { label: "Год",      days: 365, rub: 2999, stars: 1800 },
