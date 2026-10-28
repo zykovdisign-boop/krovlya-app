@@ -152,3 +152,7 @@ svg.plan-svg { width: 100%; height: auto; max-height: 62vh; display: block; back
 .from-plan { margin: 10px 0 0; font-size: 13.5px; color: var(--hint); }
 .from-plan b { color: var(--text); }
 .from-plan button { border: 0; background: none; color: var(--link); font: inherit; padding: 0 2px; text-decoration: underline; }
+
+/* монтажная схема с проводами */
+.wiring-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 12px; border: 1px solid var(--line); }
+svg.wiring { display: block; width: max(100%, 520px); height: auto; }

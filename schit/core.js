@@ -156,6 +156,10 @@
       buy.push({ g: "Кабель", name: `ВВГнг(А)-LS 3×${String(S).replace(".", ",")}`, qty: Math.ceil(cable[S] / 5) * 5, unit: "м" }));
     buy.push({ g: "Щит", name: `Бокс на ${box[0]} модулей (${Math.ceil(box[0] / box[1])} ряда по ${box[1]})`, qty: 1, unit: "шт." });
     buy.push({ g: "Щит", name: `Шина нулевая N на ${up([6, 8, 12, 14, 16, 20, 24], lines.length + 2) || lines.length + 2} отверстий`, qty: phases === 3 && lines.length > 12 ? 2 : 1, unit: "шт." });
+    if (mode === "rcd" && groups.length) {
+      const holes = up([4, 6, 8, 12], Math.max(...groups.map((g) => g.lines.length)) + 1) || 12;
+      buy.push({ g: "Щит", name: `Шина нулевая N на ${holes} отверстий — своя на каждое УЗО`, qty: groups.length, unit: "шт." });
+    }
     buy.push({ g: "Щит", name: `Шина PE на ${up([6, 8, 12, 14, 16, 20, 24], lines.length + 2) || lines.length + 2} отверстий`, qty: 1, unit: "шт." });
     buy.push({ g: "Щит", name: "Шина гребёнчатая 1P на 12 модулей", qty: rows.length, unit: "шт." });
     buy.push({ g: "Щит", name: "Наконечники НШВИ, маркировка проводов", qty: 1, unit: "компл." });

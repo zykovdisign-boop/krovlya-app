@@ -403,8 +403,12 @@
         <span class="k">Рядов по ${x.box.perRow}</span><span class="v">${x.rows.length}</span>
         ${x.mode === "rcd" ? `<span class="k">УЗО 30 мА</span><span class="v">${x.groups.length} шт.</span>` : ""}
       </div>
-      <div style="margin-top:12px">${panelSvg(x)}</div>
-      <p class="note">Цветная полоска под автоматами — к какому УЗО они подключены. Цифры — номера линий, как в таблице и на наклейках.</p>
+      <div class="seg" style="margin-top:12px"><button type="button" data-sv="mods" class="${S.shieldView !== "wires" ? "on" : ""}">Модули</button><button type="button" data-sv="wires" class="${S.shieldView === "wires" ? "on" : ""}">Провода</button></div>
+      ${S.shieldView === "wires"
+        ? `<div class="wiring-wrap">${Wiring.wiringSvg(x)}</div>
+      <p class="note">Красный — фаза${x.phases === 3 ? " (L1 коричневый, L2 чёрный, L3 серый)" : ""}, синий — ноль, жёлто-зелёный — земля. У каждого УЗО своя нулевая шина: ноль линии под УЗО подключайте только на неё, иначе УЗО будет выбивать. Схема широкая — листайте вбок.</p>`
+        : `<div>${panelSvg(x)}</div>
+      <p class="note">Цветная полоска под автоматами — к какому УЗО они подключены. Цифры — номера линий, как в таблице и на наклейках.</p>`}
       ${legendHtml(x)}
       <button class="btn" data-act="stickers" type="button">Наклейки на автоматы (PDF)</button>
       <button class="btn ghost" data-act="schemePdf" type="button">Схема щита и закупка (PDF)</button>`;
@@ -561,6 +565,8 @@
     }
     const go = e.target.closest("[data-goto]");
     if (go) { S.tab = go.dataset.goto; render(); return; }
+    const sv = e.target.closest("[data-sv]");
+    if (sv) { S.shieldView = sv.dataset.sv; render(false); haptic(); return; }
     const rv = e.target.closest("[data-rv]");
     if (rv) { S.roomView = rv.dataset.rv; render(); haptic(); return; }
     const stp = e.target.closest("[data-step]");
