@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Кухня PRO</title>
+  <script>
+    /* автообновление: если на сервере версия новее, перезагружаемся мимо кэша Telegram */
+    window.APP_VERSION = 1;
+    fetch("version.json?t=" + Date.now(), { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      if (j.v > window.APP_VERSION && !location.search.includes("v=" + j.v)) location.replace(location.pathname + "?v=" + j.v + location.hash);
+    }).catch(() => {});
+  </script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+  <header class="top">
+    <button class="project-chip" type="button">
+      <span class="chip-label">Объект</span>
+      <span class="chip-name" id="projectName">—</span>
+    </button>
+    <span class="badge" id="accessBadge">бесплатно</span>
+  </header>
+  <main id="view"></main>
+  <nav class="tabs">
+    <button type="button" data-tab="zamer">
+      <svg viewBox="0 0 24 24"><path d="M3 17L17 3l4 4L7 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/></svg>
+      Замер
+    </button>
+    <button type="button" data-tab="mods">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
+      Модули
+    </button>
+    <button type="button" data-tab="draw">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h5"/></svg>
+      Чертёж
+    </button>
+    <button type="button" data-tab="smeta">
+      <svg viewBox="0 0 24 24"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>
+      Смета
+    </button>
+    <button type="button" data-tab="tips">
+      <svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>
+      Советы
+    </button>
+  </nav>
+  <div class="toast" id="toast"></div>
+  <script src="config.js?v=1"></script>
+  <script src="core.js?v=1"></script>
+  <script src="plan.js?v=1"></script>
+  <script src="elev.js?v=1"></script>
+  <script src="tips.js?v=1"></script>
+  <script src="checklists.js?v=1"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>
