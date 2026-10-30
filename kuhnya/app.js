@@ -17,10 +17,11 @@
   };
 
   const newObj = (name) => ({ id: "o" + uid(), name: name || "Кухня", addr: "", note: "", done: {} });
-  const S = { objs: [], cur: null, tab: "build", step: null, paid: false, until: null, plans: null };
+  const BOOK = window.BOOK || [];
+  const S = { objs: [], cur: null, tab: "book", step: null, bookView: "chapters", chapter: null, read: [], paid: false, until: null, plans: null };
   const O = () => S.objs.find((o) => o.id === S.cur) || S.objs[0];
   let saveT;
-  const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { store.set("kuhnya_objs", JSON.stringify(S.objs)); store.set("kuhnya_cur", S.cur || ""); }, 300); };
+  const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { store.set("kuhnya_objs", JSON.stringify(S.objs)); store.set("kuhnya_cur", S.cur || ""); store.set("kuhnya_read", JSON.stringify(S.read)); }, 300); };
 
   function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("show"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 2600); }
   const haptic = () => tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred("light");
@@ -62,7 +63,8 @@
   }
   function accessHtml() {
     const n = STAGES.reduce((a, s) => a + s.steps.length, 0);
-    return `<h3>Доступ</h3><p class="note" style="margin-top:0">${S.paid ? (S.until ? `Полный доступ до ${untilStr()}.` : "Полный доступ навсегда. Спасибо!") : `Бесплатно: первые ${window.FREE_STEPS} шагов сборки, два узла и шесть советов. Полный доступ открывает все ${n} шагов сборки и подключения техники, все узлы и советы.`}</p>
+    const free = BOOK.filter((c) => c.free).length;
+    return `<h3>Доступ</h3><p class="note" style="margin-top:0">${S.paid ? (S.until ? `Полный доступ до ${untilStr()}.` : "Полный доступ навсегда. Спасибо!") : `Бесплатно: первые ${free} главы книги, первые ${window.FREE_STEPS} шагов сборки, два узла и шесть советов. Полный доступ открывает всю книгу (${BOOK.length} глав), все ${n} ${plural(n, "шаг", "шага", "шагов")} сборки и подключения техники, все узлы и советы.`}</p>
       ${S.paid && !S.until ? "" : `<div class="plans">${plansHtml()}</div><p class="note">Оплата звёздами Telegram. Новый срок добавляется к оставшемуся.</p>`}
       <div class="code-row"><input data-code type="text" placeholder="Код доступа" autocapitalize="characters" aria-label="Код доступа">
         <button class="btn" data-act="code" type="button">Ввести</button></div>`;
@@ -94,10 +96,12 @@
   function viewStep(sg, i) {
     const st = sg.steps[i], set = new Set(O().done[st.id] || []);
     const draw = st.draw && (window.DRAWINGS || []).find((d) => d.file === st.draw);
+    const ch = BOOK.findIndex((c) => c.steps.includes(st.id));
     $("#view").innerHTML = `<button class="back" type="button" data-back>‹ ${sg.title}</button>
       <p class="sub" style="margin:0 4px 2px">Шаг ${i + 1} из ${sg.steps.length}</p><h2>${esc(st.title)}</h2>
       <div class="card"><h3>Как делать</h3><p class="step-text">${esc(st.text)}</p>
-        ${draw ? `<button class="draw-link" type="button" data-draw="${draw.file}" data-free="1">📐 Узел: ${esc(draw.title)}</button>` : ""}</div>
+        ${draw ? `<button class="draw-link" type="button" data-draw="${draw.file}" data-free="1">📐 Узел: ${esc(draw.title)}</button>` : ""}
+        ${ch >= 0 ? `<button class="draw-link" type="button" data-chapter="${ch}">📖 Глава ${ch + 1}: ${esc(BOOK[ch].title)}</button>` : ""}</div>
       <div class="card"><h3>Проверьте</h3>${st.checks.map((t, k) => `<label class="chk ${set.has(k) ? "done" : ""}"><input type="checkbox" data-ci="${k}" ${set.has(k) ? "checked" : ""}><span>${esc(t)}</span></label>`).join("")}</div>
       <div class="tip err"><div class="tip-kind">Частая ошибка</div><div class="tip-text">${esc(st.err)}</div></div>
       <div class="step-nav">
@@ -106,18 +110,57 @@
       </div>`;
   }
 
-  /* ---------- узлы и советы ---------- */
+  /* ---------- книга: главы, узлы, советы ---------- */
   const FREE_TIPS = 6;
-  function viewNodes() {
-    const draws = window.DRAWINGS || [];
-    $("#view").innerHTML = `<h2>Узлы</h2><p class="sub" style="margin:-6px 4px 12px">Схемы с размерами и отступами. Нажмите, чтобы открыть</p>
-      <div class="card">${draws.map((d) => `<div class="cl-item" data-draw="${d.file}" data-free="${d.free ? 1 : 0}"><div class="t">${d.title}<small>${d.free || S.paid ? d.sub : "🔒 полный доступ"}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>`;
+  const chapterOpen = (i) => S.paid || BOOK[i].free;
+  function viewBook() {
+    if (S.bookView === "chapters" && S.chapter !== null) return viewChapter(S.chapter);
+    const tips = window.TIPS || [], draws = window.DRAWINGS || [];
+    let body = "";
+    if (S.bookView === "chapters") {
+      const next = BOOK.findIndex((c) => !S.read.includes(c.id));
+      body = `<div class="card"><div class="res"><span class="k">Прочитано</span><span class="v">${S.read.length} из ${BOOK.length}</span></div>
+          <div class="bar"><i style="width:${(S.read.length / BOOK.length) * 100}%"></i></div>
+          <p class="note">Прочитайте книгу целиком до первого выезда. На объекте открывайте главу из шага, к которому она относится.</p>
+          ${next >= 0 ? `<button class="btn" data-chapter="${next}" type="button">${S.read.length ? "Читать дальше" : "Начать"}: ${esc(BOOK[next].title)}</button>` : ""}</div>
+        <div class="card">${BOOK.map((c, i) => {
+          const rd = S.read.includes(c.id), n = c.steps.length;
+          const sub = !chapterOpen(i) ? "🔒 полный доступ" : c.free && !S.paid ? "бесплатно" : n ? `${n} ${plural(n, "шаг", "шага", "шагов")} в приложении` : "подготовка";
+          return `<div class="cl-item" data-chapter="${i}"><span class="num${rd ? " ok" : ""}">${rd ? "✓" : i + 1}</span><div class="t">${esc(c.title)}<small>${sub}</small></div><span style="color:var(--hint)">›</span></div>`; }).join("")}</div>`;
+    } else if (S.bookView === "nodes") {
+      body = `<p class="sub" style="margin:0 4px 12px">Схемы с размерами и отступами. Нажмите, чтобы открыть</p>
+        <div class="card">${draws.map((d) => `<div class="cl-item" data-draw="${d.file}" data-free="${d.free ? 1 : 0}"><div class="t">${d.title}<small>${d.free || S.paid ? d.sub : "🔒 полный доступ"}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>`;
+    } else {
+      body = tips.map((t, i) => { const lk = !S.paid && i >= FREE_TIPS; return `<div class="tip ${t.kind}${lk ? " locked" : ""}"><div class="tip-kind">${t.kind === "hack" ? "Лайфхак" : "Ошибка"} · ${t.title}</div>
+        <div class="tip-text">${lk ? "Откройте полный доступ, чтобы прочитать." : t.text}</div><div class="tip-src">${t.topic}</div></div>`; }).join("")
+        + (S.paid ? "" : `<button class="btn" data-tab="obj" type="button">Открыть все ${tips.length} советов</button>`);
+    }
+    $("#view").innerHTML = `<h2>Кухня без переделок</h2>${seg("data-bv", [["chapters", "Главы"], ["nodes", `Узлы (${draws.length})`], ["tips", `Советы (${tips.length})`]], S.bookView)}<div style="margin-top:12px">${body}</div>`;
   }
-  function viewTips() {
-    const tips = window.TIPS || [];
-    $("#view").innerHTML = `<h2>Советы</h2>${tips.map((t, i) => { const lk = !S.paid && i >= FREE_TIPS; return `<div class="tip ${t.kind}${lk ? " locked" : ""}"><div class="tip-kind">${t.kind === "hack" ? "Лайфхак" : "Ошибка"} · ${t.title}</div>
-      <div class="tip-text">${lk ? "Откройте полный доступ, чтобы прочитать." : t.text}</div><div class="tip-src">${t.topic}</div></div>`; }).join("")}
-      ${S.paid ? "" : `<button class="btn" data-tab="obj" type="button">Открыть все ${tips.length} советов</button>`}`;
+  const seg = (attr, opts, cur) => `<div class="seg">${opts.map(([v, t]) => `<button type="button" ${attr}="${v}" class="${v === cur ? "on" : ""}">${t}</button>`).join("")}</div>`;
+
+  // Шаги приложения, о которых рассказывает глава: «build:3» → этап и номер.
+  const stepRef = (id) => { for (const sg of STAGES) { const i = sg.steps.findIndex((st) => st.id === id); if (i >= 0) return { sg, i, st: sg.steps[i] }; } return null; };
+  function viewChapter(i) {
+    const c = BOOK[i];
+    if (!S.read.includes(c.id)) { S.read.push(c.id); save(); }
+    const block = (b) => {
+      if (b.h) return `<h3 class="bk-h">${esc(b.h)}</h3>`;
+      if (b.p) return `<p class="bk-p">${esc(b.p)}</p>`;
+      if (b.warn) return `<div class="warn">${esc(b.warn)}</div>`;
+      if (b.list) return `<ul class="bk-list">${b.list.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+      if (b.draw) { const d = (window.DRAWINGS || []).find((x) => x.file === b.draw); return d ? `<button class="draw-link" type="button" data-draw="${d.file}" data-free="1">📐 Узел: ${esc(d.title)}</button>` : ""; }
+      return "";
+    };
+    const refs = c.steps.map(stepRef).filter(Boolean);
+    $("#view").innerHTML = `<button class="back" type="button" data-back>‹ Все главы</button>
+      <p class="sub" style="margin:0 4px 2px">Глава ${i + 1} из ${BOOK.length}</p><h2>${esc(c.title)}</h2>
+      <div class="card book">${c.body.map(block).join("")}</div>
+      ${refs.length ? `<div class="card"><h3>Шаги в приложении</h3>${refs.map((r) => `<div class="cl-item" data-gostep="${r.sg.id}:${r.i}"><span class="num${stepDone(r.st) ? " ok" : ""}">${stepDone(r.st) ? "✓" : r.i + 1}</span><div class="t">${esc(r.st.title)}<small>${r.sg.title}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>` : ""}
+      <div class="step-nav">
+        <button class="btn ghost" type="button" data-chapter="${i - 1}" ${i ? "" : "disabled"}>‹ Назад</button>
+        <button class="btn" type="button" data-chapter="${i + 1 < BOOK.length ? i + 1 : "end"}">${i + 1 < BOOK.length ? "Следующая глава ›" : "К главам"}</button>
+      </div>`;
   }
 
   /* ---------- объект ---------- */
@@ -157,19 +200,18 @@
   }
 
   /* ---------- рендер ---------- */
-  const goBack = () => { S.step = null; render(); };
+  const goBack = () => { S.step = null; S.chapter = null; render(); };
   function syncBack() {
     if (!tg || !tg.BackButton) return;
     tg.BackButton.offClick(goBack);
-    if (S.step !== null) { tg.BackButton.show(); tg.BackButton.onClick(goBack); } else tg.BackButton.hide();
+    if (S.step !== null || S.chapter !== null) { tg.BackButton.show(); tg.BackButton.onClick(goBack); } else tg.BackButton.hide();
   }
   function render(top = true) {
     $("#projectName").textContent = O().name || "—";
     document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.tab));
     const y = window.scrollY, sg = stageOf(S.tab);
     if (sg) { if (S.step !== null) viewStep(sg, S.step); else viewStage(sg); }
-    else if (S.tab === "nodes") viewNodes();
-    else if (S.tab === "tips") viewTips();
+    else if (S.tab === "book") viewBook();
     else viewObj();
     syncBack();
     window.scrollTo(0, top ? 0 : y);
@@ -179,7 +221,19 @@
   document.addEventListener("click", (e) => {
     const T = (s) => e.target.closest(s);
     let el;
-    if ((el = T("[data-tab]"))) { S.tab = el.dataset.tab; S.step = null; render(); haptic(); return; }
+    if ((el = T("[data-tab]"))) { S.tab = el.dataset.tab; S.step = null; S.chapter = null; render(); haptic(); return; }
+    if ((el = T("[data-bv]"))) { S.bookView = el.dataset.bv; S.chapter = null; render(); haptic(); return; }
+    if ((el = T("[data-chapter]"))) {
+      if (el.dataset.chapter === "end") { goBack(); return; }
+      const i = Number(el.dataset.chapter);
+      if (!chapterOpen(i)) { toast("Эта глава — в полном доступе"); return; }
+      S.tab = "book"; S.bookView = "chapters"; S.chapter = i; S.step = null; render(); haptic(); return;
+    }
+    if ((el = T("[data-gostep]"))) {
+      const [stage, n] = el.dataset.gostep.split(":"), i = Number(n);
+      if (!canOpen(stageOf(stage), i)) { toast("Этот шаг — в полном доступе"); return; }
+      S.tab = stage; S.step = i; S.chapter = null; render(); haptic(); return;
+    }
     if ((el = T("[data-open]"))) {
       const sg = stageOf(S.tab), i = Number(el.dataset.open);
       if (!canOpen(sg, i)) { toast("Этот шаг — в полном доступе"); return; }
@@ -248,8 +302,11 @@
 
   /* ---------- init ---------- */
   async function init() {
-    const [objStr, curStr] = await Promise.all([store.get("kuhnya_objs"), store.get("kuhnya_cur")]);
+    const [objStr, curStr, readStr] = await Promise.all([store.get("kuhnya_objs"), store.get("kuhnya_cur"), store.get("kuhnya_read")]);
     try { if (objStr) S.objs = JSON.parse(objStr) || []; } catch (_) {}
+    try { if (readStr) S.read = JSON.parse(readStr) || []; } catch (_) {}
+    // кто уже начал сборку, сразу попадает в шаги; новичок — в книгу
+    if (S.objs.some((o) => Object.keys(o.done || {}).length)) S.tab = "build";
     if (!S.objs.length) S.objs = [newObj("Кухня")];
     S.objs.forEach((o) => { if (!o.done) o.done = {}; });
     S.cur = curStr && S.objs.some((o) => o.id === curStr) ? curStr : S.objs[0].id;

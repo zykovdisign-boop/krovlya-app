@@ -6,13 +6,13 @@
   <title>Кухня PRO</title>
   <script>
     /* автообновление: если на сервере версия новее, перезагружаемся мимо кэша Telegram */
-    window.APP_VERSION = 2;
+    window.APP_VERSION = 3;
     fetch("version.json?t=" + Date.now(), { cache: "no-store" }).then((r) => r.json()).then((j) => {
       if (j.v > window.APP_VERSION && !location.search.includes("v=" + j.v)) location.replace(location.pathname + "?v=" + j.v + location.hash);
     }).catch(() => {});
   </script>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <header class="top">
@@ -24,6 +24,10 @@
   </header>
   <main id="view"></main>
   <nav class="tabs">
+    <button type="button" data-tab="book">
+      <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20V3H6.5A2.5 2.5 0 004 5.5z"/><path d="M4 19.5A2.5 2.5 0 006.5 22H20v-5"/></svg>
+      Книга
+    </button>
     <button type="button" data-tab="build">
       <svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>
       Сборка
@@ -32,23 +36,16 @@
       <svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="13" r="4"/><path d="M8 6h.01M11 6h.01"/></svg>
       Техника
     </button>
-    <button type="button" data-tab="nodes">
-      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h5"/></svg>
-      Узлы
-    </button>
-    <button type="button" data-tab="tips">
-      <svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>
-      Советы
-    </button>
     <button type="button" data-tab="obj">
       <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/></svg>
       Объект
     </button>
   </nav>
   <div class="toast" id="toast"></div>
-  <script src="config.js?v=2"></script>
-  <script src="steps.js?v=2"></script>
-  <script src="tips.js?v=2"></script>
-  <script src="app.js?v=2"></script>
+  <script src="config.js?v=3"></script>
+  <script src="steps.js?v=3"></script>
+  <script src="book.js?v=3"></script>
+  <script src="tips.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

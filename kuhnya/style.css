@@ -197,3 +197,12 @@ svg.elev, svg.elev-mini, svg.ctop, svg.sheets { display: block; width: 100%; hei
 .step-nav .btn:disabled { opacity: .45; }
 textarea { width: 100%; font: inherit; font-size: 16px; color: var(--text); background: var(--bg2); border: 1px solid transparent; border-radius: 10px; padding: 10px; outline: none; resize: vertical; }
 textarea:focus { border-color: var(--btn); }
+
+/* книга */
+.book .bk-p { margin: 0 0 12px; font-size: 15.5px; line-height: 1.55; }
+.book .bk-h { margin: 18px 0 8px; font-size: 16px; }
+.book .bk-h:first-child { margin-top: 0; }
+.book .bk-list { margin: 0 0 12px; padding-left: 20px; font-size: 15px; line-height: 1.5; }
+.book .bk-list li { margin-bottom: 6px; }
+.book .warn { margin: 4px 0 12px; }
+.book .draw-link { margin: 4px 0 12px; }
