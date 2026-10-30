@@ -206,3 +206,11 @@ textarea:focus { border-color: var(--btn); }
 .book .bk-list li { margin-bottom: 6px; }
 .book .warn { margin: 4px 0 12px; }
 .book .draw-link { margin: 4px 0 12px; }
+
+/* подробные шаги и справочник */
+ol.how { margin: 0; padding-left: 22px; font-size: 15px; line-height: 1.5; }
+ol.how li { margin-bottom: 9px; padding-left: 2px; }
+ol.how li::marker { font-weight: 700; color: var(--btn); }
+ul.need { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-btn { border: 1px solid var(--line); background: var(--bg2); color: var(--text); font: inherit; font-size: 14px; padding: 9px 12px; border-radius: 99px; min-height: 40px; }

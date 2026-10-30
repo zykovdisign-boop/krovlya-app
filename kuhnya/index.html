@@ -6,13 +6,13 @@
   <title>Кухня PRO</title>
   <script>
     /* автообновление: если на сервере версия новее, перезагружаемся мимо кэша Telegram */
-    window.APP_VERSION = 3;
+    window.APP_VERSION = 4;
     fetch("version.json?t=" + Date.now(), { cache: "no-store" }).then((r) => r.json()).then((j) => {
       if (j.v > window.APP_VERSION && !location.search.includes("v=" + j.v)) location.replace(location.pathname + "?v=" + j.v + location.hash);
     }).catch(() => {});
   </script>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <header class="top">
@@ -42,10 +42,11 @@
     </button>
   </nav>
   <div class="toast" id="toast"></div>
-  <script src="config.js?v=3"></script>
-  <script src="steps.js?v=3"></script>
-  <script src="book.js?v=3"></script>
-  <script src="tips.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="config.js?v=4"></script>
+  <script src="steps.js?v=4"></script>
+  <script src="book.js?v=4"></script>
+  <script src="parts.js?v=4"></script>
+  <script src="tips.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

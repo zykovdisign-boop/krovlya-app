@@ -60,4 +60,9 @@ window.DRAWINGS = [
   { file: "drawings/07_oven_dw.svg", title: "Духовка и посудомойка", sub: "зазоры и вентиляция ниши", free: false },
   { file: "drawings/08_corner.svg", title: "Угловые модули", sub: "Г-образный и глухой с добором", free: false },
   { file: "drawings/09_hood.svg", title: "Вытяжка", sub: "высота над плитой и воздуховод", free: false },
+  { file: "drawings/10_confirmat.svg", title: "Конфирмат", sub: "отверстия и как закручивать", free: true },
+  { file: "drawings/11_eccentric.svg", title: "Эксцентриковая стяжка", sub: "шток, эксцентрик, куда поворачивать", free: true },
+  { file: "drawings/12_mezhsek.svg", title: "Межсекционная стяжка", sub: "винт с ответной гайкой между шкафами", free: false },
+  { file: "drawings/13_hanger.svg", title: "Навес, шина и крюки", sub: "как посчитать высоту шины", free: false },
+  { file: "drawings/14_hinge.svg", title: "Петля", sub: "сверловка фасада и три винта регулировки", free: false },
 ];

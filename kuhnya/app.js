@@ -18,7 +18,7 @@
 
   const newObj = (name) => ({ id: "o" + uid(), name: name || "Кухня", addr: "", note: "", done: {} });
   const BOOK = window.BOOK || [];
-  const S = { objs: [], cur: null, tab: "book", step: null, bookView: "chapters", chapter: null, read: [], paid: false, until: null, plans: null };
+  const S = { objs: [], cur: null, tab: "book", step: null, bookView: "chapters", chapter: null, part: null, partFrom: null, read: [], paid: false, until: null, plans: null };
   const O = () => S.objs.find((o) => o.id === S.cur) || S.objs[0];
   let saveT;
   const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { store.set("kuhnya_objs", JSON.stringify(S.objs)); store.set("kuhnya_cur", S.cur || ""); store.set("kuhnya_read", JSON.stringify(S.read)); }, 300); };
@@ -99,9 +99,12 @@
     const ch = BOOK.findIndex((c) => c.steps.includes(st.id));
     $("#view").innerHTML = `<button class="back" type="button" data-back>‹ ${sg.title}</button>
       <p class="sub" style="margin:0 4px 2px">Шаг ${i + 1} из ${sg.steps.length}</p><h2>${esc(st.title)}</h2>
-      <div class="card"><h3>Как делать</h3><p class="step-text">${esc(st.text)}</p>
+      <div class="card"><p class="step-text">${esc(st.text)}</p>
         ${draw ? `<button class="draw-link" type="button" data-draw="${draw.file}" data-free="1">📐 Узел: ${esc(draw.title)}</button>` : ""}
         ${ch >= 0 ? `<button class="draw-link" type="button" data-chapter="${ch}">📖 Глава ${ch + 1}: ${esc(BOOK[ch].title)}</button>` : ""}</div>
+      ${(st.need || []).length ? `<div class="card"><h3>Что понадобится</h3><ul class="bk-list need">${st.need.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+      ${(st.how || []).length ? `<div class="card"><h3>Порядок работы</h3><ol class="how">${st.how.map((x) => `<li>${esc(x)}</li>`).join("")}</ol></div>` : ""}
+      ${partsOf(st).length ? `<div class="card"><h3>Фурнитура в этом шаге</h3><p class="note" style="margin:-4px 0 8px">Нажмите, чтобы узнать, как она выглядит и как ставится</p><div class="chips">${partsOf(st).map((p) => `<button type="button" class="chip-btn" data-part="${p.id}">🔩 ${esc(p.name)}</button>`).join("")}</div></div>` : ""}
       <div class="card"><h3>Проверьте</h3>${st.checks.map((t, k) => `<label class="chk ${set.has(k) ? "done" : ""}"><input type="checkbox" data-ci="${k}" ${set.has(k) ? "checked" : ""}><span>${esc(t)}</span></label>`).join("")}</div>
       <div class="tip err"><div class="tip-kind">Частая ошибка</div><div class="tip-text">${esc(st.err)}</div></div>
       <div class="step-nav">
@@ -110,11 +113,32 @@
       </div>`;
   }
 
+  /* ---------- справочник фурнитуры ---------- */
+  const PARTS = window.PARTS || [];
+  const partsOf = (st) => (st.parts || []).map((id) => PARTS.find((p) => p.id === id)).filter(Boolean);
+  // Где фурнитура встречается в шагах — чтобы из справочника вернуться к работе.
+  const stepsWithPart = (id) => STAGES.flatMap((sg) => sg.steps.map((st, i) => ({ sg, st, i })).filter((x) => (x.st.parts || []).includes(id)));
+  function viewPart(id) {
+    const p = PARTS.find((x) => x.id === id);
+    if (!p) { S.part = null; return viewBook(); }
+    const d = p.draw && (window.DRAWINGS || []).find((x) => x.file === p.draw);
+    const used = stepsWithPart(p.id);
+    $("#view").innerHTML = `<button class="back" type="button" data-back>‹ ${S.partFrom ? "К шагу" : "Справочник"}</button>
+      <h2>${esc(p.name)}</h2><p class="sub" style="margin:-6px 4px 12px">Ещё называют: ${esc(p.aka)}</p>
+      <div class="card book"><h3 class="bk-h">Как выглядит</h3><p class="bk-p">${esc(p.look)}</p>
+        <h3 class="bk-h">Где стоит</h3><p class="bk-p">${esc(p.where)}</p>
+        ${d ? `<button class="draw-link" type="button" data-draw="${d.file}" data-free="1">📐 Схема: ${esc(d.title)}</button>` : ""}</div>
+      <div class="card"><h3>Как ставить</h3><ol class="how">${p.how.map((x) => `<li>${esc(x)}</li>`).join("")}</ol></div>
+      <div class="tip err"><div class="tip-kind">Частая ошибка</div><div class="tip-text">${esc(p.err)}</div></div>
+      ${used.length ? `<div class="card"><h3>Где встречается</h3>${used.map((u) => `<div class="cl-item" data-gostep="${u.sg.id}:${u.i}"><div class="t">${esc(u.st.title)}<small>${u.sg.title}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>` : ""}`;
+  }
+
   /* ---------- книга: главы, узлы, советы ---------- */
   const FREE_TIPS = 6;
   const chapterOpen = (i) => S.paid || BOOK[i].free;
   function viewBook() {
     if (S.bookView === "chapters" && S.chapter !== null) return viewChapter(S.chapter);
+    if (S.bookView === "parts" && S.part !== null) return viewPart(S.part);
     const tips = window.TIPS || [], draws = window.DRAWINGS || [];
     let body = "";
     if (S.bookView === "chapters") {
@@ -127,6 +151,9 @@
           const rd = S.read.includes(c.id), n = c.steps.length;
           const sub = !chapterOpen(i) ? "🔒 полный доступ" : c.free && !S.paid ? "бесплатно" : n ? `${n} ${plural(n, "шаг", "шага", "шагов")} в приложении` : "подготовка";
           return `<div class="cl-item" data-chapter="${i}"><span class="num${rd ? " ok" : ""}">${rd ? "✓" : i + 1}</span><div class="t">${esc(c.title)}<small>${sub}</small></div><span style="color:var(--hint)">›</span></div>`; }).join("")}</div>`;
+    } else if (S.bookView === "parts") {
+      body = `<p class="sub" style="margin:0 4px 12px">Чем собирается кухня и как это ставить. Для тех, кто держит конфирмат в руках первый раз</p>
+        <div class="card">${PARTS.map((p) => `<div class="cl-item" data-part="${p.id}"><span class="num">🔩</span><div class="t">${esc(p.name)}<small>${esc(p.aka)}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>`;
     } else if (S.bookView === "nodes") {
       body = `<p class="sub" style="margin:0 4px 12px">Схемы с размерами и отступами. Нажмите, чтобы открыть</p>
         <div class="card">${draws.map((d) => `<div class="cl-item" data-draw="${d.file}" data-free="${d.free ? 1 : 0}"><div class="t">${d.title}<small>${d.free || S.paid ? d.sub : "🔒 полный доступ"}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>`;
@@ -135,7 +162,7 @@
         <div class="tip-text">${lk ? "Откройте полный доступ, чтобы прочитать." : t.text}</div><div class="tip-src">${t.topic}</div></div>`; }).join("")
         + (S.paid ? "" : `<button class="btn" data-tab="obj" type="button">Открыть все ${tips.length} советов</button>`);
     }
-    $("#view").innerHTML = `<h2>Кухня без переделок</h2>${seg("data-bv", [["chapters", "Главы"], ["nodes", `Узлы (${draws.length})`], ["tips", `Советы (${tips.length})`]], S.bookView)}<div style="margin-top:12px">${body}</div>`;
+    $("#view").innerHTML = `<h2>Кухня без переделок</h2>${seg("data-bv", [["chapters", "Главы"], ["parts", "Крепёж"], ["nodes", "Узлы"], ["tips", "Советы"]], S.bookView)}<div style="margin-top:12px">${body}</div>`;
   }
   const seg = (attr, opts, cur) => `<div class="seg">${opts.map(([v, t]) => `<button type="button" ${attr}="${v}" class="${v === cur ? "on" : ""}">${t}</button>`).join("")}</div>`;
 
@@ -200,11 +227,14 @@
   }
 
   /* ---------- рендер ---------- */
-  const goBack = () => { S.step = null; S.chapter = null; render(); };
+  const goBack = () => {
+    if (S.part !== null && S.partFrom) { const f = S.partFrom; S.part = null; S.partFrom = null; S.tab = f.tab; S.step = f.step; render(); return; }
+    S.step = null; S.chapter = null; S.part = null; render();
+  };
   function syncBack() {
     if (!tg || !tg.BackButton) return;
     tg.BackButton.offClick(goBack);
-    if (S.step !== null || S.chapter !== null) { tg.BackButton.show(); tg.BackButton.onClick(goBack); } else tg.BackButton.hide();
+    if (S.step !== null || S.chapter !== null || S.part !== null) { tg.BackButton.show(); tg.BackButton.onClick(goBack); } else tg.BackButton.hide();
   }
   function render(top = true) {
     $("#projectName").textContent = O().name || "—";
@@ -221,18 +251,22 @@
   document.addEventListener("click", (e) => {
     const T = (s) => e.target.closest(s);
     let el;
-    if ((el = T("[data-tab]"))) { S.tab = el.dataset.tab; S.step = null; S.chapter = null; render(); haptic(); return; }
-    if ((el = T("[data-bv]"))) { S.bookView = el.dataset.bv; S.chapter = null; render(); haptic(); return; }
+    if ((el = T("[data-tab]"))) { S.tab = el.dataset.tab; S.step = null; S.chapter = null; S.part = null; S.partFrom = null; render(); haptic(); return; }
+    if ((el = T("[data-bv]"))) { S.bookView = el.dataset.bv; S.chapter = null; S.part = null; S.partFrom = null; render(); haptic(); return; }
+    if ((el = T("[data-part]"))) {
+      S.partFrom = stageOf(S.tab) && S.step !== null ? { tab: S.tab, step: S.step } : null;
+      S.tab = "book"; S.bookView = "parts"; S.part = el.dataset.part; S.chapter = null; S.step = null; render(); haptic(); return;
+    }
     if ((el = T("[data-chapter]"))) {
       if (el.dataset.chapter === "end") { goBack(); return; }
       const i = Number(el.dataset.chapter);
       if (!chapterOpen(i)) { toast("Эта глава — в полном доступе"); return; }
-      S.tab = "book"; S.bookView = "chapters"; S.chapter = i; S.step = null; render(); haptic(); return;
+      S.tab = "book"; S.bookView = "chapters"; S.chapter = i; S.step = null; S.part = null; S.partFrom = null; render(); haptic(); return;
     }
     if ((el = T("[data-gostep]"))) {
       const [stage, n] = el.dataset.gostep.split(":"), i = Number(n);
       if (!canOpen(stageOf(stage), i)) { toast("Этот шаг — в полном доступе"); return; }
-      S.tab = stage; S.step = i; S.chapter = null; render(); haptic(); return;
+      S.tab = stage; S.step = i; S.chapter = null; S.part = null; S.partFrom = null; render(); haptic(); return;
     }
     if ((el = T("[data-open]"))) {
       const sg = stageOf(S.tab), i = Number(el.dataset.open);
