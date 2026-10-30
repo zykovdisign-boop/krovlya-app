@@ -30,8 +30,13 @@
   /* ---------- прогресс ---------- */
   const stageOf = (id) => STAGES.find((s) => s.id === id);
   const doneOf = (st, o = O()) => (o.done[st.id] || []).length;
-  const stepDone = (st, o = O()) => doneOf(st, o) === st.checks.length;
-  const stageProg = (sg, o = O()) => ({ all: sg.steps.reduce((a, st) => a + st.checks.length, 0), d: sg.steps.reduce((a, st) => a + doneOf(st, o), 0), steps: sg.steps.filter((st) => stepDone(st, o)).length });
+  // шаг, которого нет на объекте (нет посудомойки, газа…), считается закрытым
+  const skipped = (st, o = O()) => !!(o.skip && o.skip[st.id]);
+  const stepDone = (st, o = O()) => skipped(st, o) || doneOf(st, o) === st.checks.length;
+  const stageProg = (sg, o = O()) => {
+    const live = sg.steps.filter((st) => !skipped(st, o));
+    return { all: live.reduce((a, st) => a + st.checks.length, 0), d: live.reduce((a, st) => a + doneOf(st, o), 0), steps: sg.steps.filter((st) => stepDone(st, o)).length };
+  };
   const isFree = (sg, i) => sg.id === "build" && i < (window.FREE_STEPS || 0);
   const canOpen = (sg, i) => S.paid || isFree(sg, i);
 
@@ -86,27 +91,28 @@
       <div class="card"><div class="res"><span class="k">${esc(O().name)}</span><span class="v">${p.steps} из ${sg.steps.length} ${plural(sg.steps.length, "шага", "шагов", "шагов")}</span></div>
         <div class="bar"><i style="width:${p.all ? (p.d / p.all) * 100 : 0}%"></i></div>
         ${next >= 0 ? `<button class="btn" data-open="${next}" type="button">${p.d ? "Продолжить" : "Начать"}: ${esc(sg.steps[next].title)}</button>` : `<p class="note">Этап пройден целиком ✓</p>`}</div>
-      <div class="card">${sg.steps.map((st, i) => { const d = doneOf(st), ok = canOpen(sg, i), full = d === st.checks.length;
-        return `<div class="cl-item" data-open="${i}"><span class="num${full ? " ok" : ""}">${full ? "✓" : i + 1}</span>
-          <div class="t">${esc(st.title)}<small>${ok ? `${d} из ${st.checks.length}` : "🔒 полный доступ"}</small>${ok && d && !full ? `<div class="bar"><i style="width:${(d / st.checks.length) * 100}%"></i></div>` : ""}</div><span style="color:var(--hint)">›</span></div>`; }).join("")}</div>
+      <div class="card">${sg.steps.map((st, i) => { const d = doneOf(st), ok = canOpen(sg, i), sk = skipped(st), full = !sk && d === st.checks.length;
+        return `<div class="cl-item${sk ? " skip" : ""}" data-open="${i}"><span class="num${full ? " ok" : ""}">${full ? "✓" : sk ? "–" : i + 1}</span>
+          <div class="t">${esc(st.title)}<small>${!ok ? "🔒 полный доступ" : sk ? "не нужно на этом объекте" : `${d} из ${st.checks.length}`}</small>${ok && d && !full ? `<div class="bar"><i style="width:${(d / st.checks.length) * 100}%"></i></div>` : ""}</div><span style="color:var(--hint)">›</span></div>`; }).join("")}</div>
       ${S.paid ? "" : `<p class="note" style="margin:0 4px 16px">Первые ${window.FREE_STEPS} шагов сборки открыты бесплатно, остальные — в полном доступе на вкладке «Объект».</p>`}`;
   }
 
   /* ---------- шаг ---------- */
   function viewStep(sg, i) {
     const st = sg.steps[i], set = new Set(O().done[st.id] || []);
-    const draw = st.draw && (window.DRAWINGS || []).find((d) => d.file === st.draw);
+    const figs = (st.draws || []).map((f) => (window.DRAWINGS || []).find((d) => d.file === f) || { file: f, title: "" });
     const ch = BOOK.findIndex((c) => c.steps.includes(st.id));
     $("#view").innerHTML = `<button class="back" type="button" data-back>‹ ${sg.title}</button>
       <p class="sub" style="margin:0 4px 2px">Шаг ${i + 1} из ${sg.steps.length}</p><h2>${esc(st.title)}</h2>
       <div class="card"><p class="step-text">${esc(st.text)}</p>
-        ${draw ? `<button class="draw-link" type="button" data-draw="${draw.file}" data-free="1">📐 Узел: ${esc(draw.title)}</button>` : ""}
         ${ch >= 0 ? `<button class="draw-link" type="button" data-chapter="${ch}">📖 Глава ${ch + 1}: ${esc(BOOK[ch].title)}</button>` : ""}</div>
+      ${figs.length ? `<div class="figs">${figs.map((d) => `<figure class="fig" data-draw="${d.file}" data-free="1"><img src="${d.file}" alt="${esc(d.title)}" loading="lazy"><figcaption>${esc(d.title)} · нажмите, чтобы увеличить</figcaption></figure>`).join("")}</div>` : ""}
       ${(st.need || []).length ? `<div class="card"><h3>Что понадобится</h3><ul class="bk-list need">${st.need.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
       ${(st.how || []).length ? `<div class="card"><h3>Порядок работы</h3><ol class="how">${st.how.map((x) => `<li>${esc(x)}</li>`).join("")}</ol></div>` : ""}
       ${partsOf(st).length ? `<div class="card"><h3>Фурнитура в этом шаге</h3><p class="note" style="margin:-4px 0 8px">Нажмите, чтобы узнать, как она выглядит и как ставится</p><div class="chips">${partsOf(st).map((p) => `<button type="button" class="chip-btn" data-part="${p.id}">🔩 ${esc(p.name)}</button>`).join("")}</div></div>` : ""}
       <div class="card"><h3>Проверьте</h3>${st.checks.map((t, k) => `<label class="chk ${set.has(k) ? "done" : ""}"><input type="checkbox" data-ci="${k}" ${set.has(k) ? "checked" : ""}><span>${esc(t)}</span></label>`).join("")}</div>
       <div class="tip err"><div class="tip-kind">Частая ошибка</div><div class="tip-text">${esc(st.err)}</div></div>
+      <button class="linkbtn skip-btn" data-act="skip" type="button">${skipped(st) ? "Вернуть шаг: он нужен на этом объекте" : "Этого нет на объекте, пропустить шаг"}</button>
       <div class="step-nav">
         <button class="btn ghost" type="button" data-go="${i - 1}" ${i ? "" : "disabled"}>‹ Назад</button>
         <button class="btn" type="button" data-go="${i + 1}">${i + 1 < sg.steps.length ? "Дальше ›" : "К этапу"}</button>
@@ -146,7 +152,9 @@
       body = `<div class="card"><div class="res"><span class="k">Прочитано</span><span class="v">${S.read.length} из ${BOOK.length}</span></div>
           <div class="bar"><i style="width:${(S.read.length / BOOK.length) * 100}%"></i></div>
           <p class="note">Прочитайте книгу целиком до первого выезда. На объекте открывайте главу из шага, к которому она относится.</p>
-          ${next >= 0 ? `<button class="btn" data-chapter="${next}" type="button">${S.read.length ? "Читать дальше" : "Начать"}: ${esc(BOOK[next].title)}</button>` : ""}</div>
+          ${next >= 0 ? `<button class="btn" data-chapter="${next}" type="button">${S.read.length ? "Читать дальше" : "Начать"}: ${esc(BOOK[next].title)}</button>` : ""}
+          <button class="btn ghost" data-act="pdf" type="button">📄 Скачать книгу в PDF${S.paid ? "" : " · 🔒"}</button>
+          <p class="note">PDF придёт в чат с ботом: книга, справочник фурнитуры и все шаги с чек-листами для печати.</p></div>
         <div class="card">${BOOK.map((c, i) => {
           const rd = S.read.includes(c.id), n = c.steps.length;
           const sub = !chapterOpen(i) ? "🔒 полный доступ" : c.free && !S.paid ? "бесплатно" : n ? `${n} ${plural(n, "шаг", "шага", "шагов")} в приложении` : "подготовка";
@@ -162,7 +170,27 @@
         <div class="tip-text">${lk ? "Откройте полный доступ, чтобы прочитать." : t.text}</div><div class="tip-src">${t.topic}</div></div>`; }).join("")
         + (S.paid ? "" : `<button class="btn" data-tab="obj" type="button">Открыть все ${tips.length} советов</button>`);
     }
-    $("#view").innerHTML = `<h2>Кухня без переделок</h2>${seg("data-bv", [["chapters", "Главы"], ["parts", "Крепёж"], ["nodes", "Узлы"], ["tips", "Советы"]], S.bookView)}<div style="margin-top:12px">${body}</div>`;
+    S.bookBody = body;
+    $("#view").innerHTML = `<h2>Кухня без переделок</h2>
+      <input class="search" data-search type="search" placeholder="Поиск: петля, сифон, шина, цоколь…" value="${esc(S.q || "")}" aria-label="Поиск">
+      ${seg("data-bv", [["chapters", "Главы"], ["parts", "Крепёж"], ["nodes", "Узлы"], ["tips", "Советы"]], S.bookView)}<div id="bookBody" style="margin-top:12px">${(S.q || "").trim().length >= 2 ? searchHtml(S.q) : body}</div>`;
+  }
+
+  // Поиск по шагам, главам и справочнику: все слова запроса должны встретиться в тексте.
+  function searchHtml(q) {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (parts) => { const t = parts.join(" ").toLowerCase(); return words.every((w) => t.includes(w)); };
+    const row = (attr, title, sub) => `<div class="cl-item" ${attr}><div class="t">${esc(title)}<small>${sub}</small></div><span style="color:var(--hint)">›</span></div>`;
+    const res = [];
+    STAGES.forEach((sg) => sg.steps.forEach((st, i) => {
+      if (hit([st.title, st.text, st.err, ...(st.how || []), ...(st.need || []), ...st.checks])) res.push(row(`data-gostep="${sg.id}:${i}"`, st.title, `Шаг · ${sg.title}${canOpen(sg, i) ? "" : " · 🔒"}`));
+    }));
+    BOOK.forEach((c, i) => {
+      if (hit([c.title, ...c.body.map((b) => b.p || b.h || b.warn || (b.list || []).join(" ") || "")])) res.push(row(`data-chapter="${i}"`, c.title, `Глава ${i + 1}${chapterOpen(i) ? "" : " · 🔒"}`));
+    });
+    PARTS.forEach((p) => { if (hit([p.name, p.aka, p.look, p.where, p.err, ...p.how])) res.push(row(`data-part="${p.id}"`, p.name, "Справочник")); });
+    return res.length ? `<p class="sub" style="margin:0 4px 8px">Найдено: ${res.length}</p><div class="card">${res.slice(0, 40).join("")}</div>`
+      : `<p class="note" style="margin:0 4px">Ничего не нашлось. Попробуйте другое слово: «петля», «сифон», «цоколь».</p>`;
   }
   const seg = (attr, opts, cur) => `<div class="seg">${opts.map(([v, t]) => `<button type="button" ${attr}="${v}" class="${v === cur ? "on" : ""}">${t}</button>`).join("")}</div>`;
 
@@ -191,6 +219,9 @@
   }
 
   /* ---------- объект ---------- */
+  // Что взять с собой: группы из steps.js, отметки свои у каждого объекта
+  const KIT_GROUPS = window.KIT || [];
+  const KIT = KIT_GROUPS.flatMap((g) => g.items);
   function viewObj() {
     const o = O();
     $("#view").innerHTML = `<h2>Объект</h2>
@@ -198,6 +229,10 @@
         <label class="f full">Название<input data-of="name" type="text" value="${esc(o.name)}"></label>
         <label class="f full">Адрес, заказчик<input data-of="addr" type="text" value="${esc(o.addr)}" placeholder="ул. Ленина 5, кв. 12, Ирина"></label>
         <label class="f full">Заметки<textarea data-of="note" rows="4" placeholder="Что докупить, что пришло с браком, что обещали заказчику">${esc(o.note)}</textarea></label></div></div>
+      <div class="card"><details${o.kitOpen ? " open" : ""} data-kitbox><summary><b>Что взять с собой</b> <span class="sub-inline">${(o.kit || []).length} из ${KIT.length}</span></summary>
+        <p class="note">Инструмент и расходники из всех шагов. Отметьте, что уже в машине.</p>
+        ${KIT_GROUPS.map((g) => `<h3 class="bk-h">${esc(g.g)}</h3>` + g.items.map((x) => `<label class="chk ${(o.kit || []).includes(x) ? "done" : ""}"><input type="checkbox" data-kit="${esc(x)}" ${(o.kit || []).includes(x) ? "checked" : ""}><span>${esc(x)}</span></label>`).join("")).join("")}
+        <button class="btn ghost" data-act="kitReset" type="button">Снять отметки списка</button></details></div>
       <div class="card"><h3>Ход работ</h3><div class="res">${STAGES.map((sg) => { const p = stageProg(sg); return `<span class="k">${sg.title}</span><span class="v">${p.steps} из ${sg.steps.length}</span>`; }).join("")}</div>
         <button class="btn ghost" data-act="copyReport" type="button">Скопировать отчёт для заказчика</button>
         <button class="btn ghost" data-act="resetObj" type="button">Снять все отметки</button></div>
@@ -208,7 +243,12 @@
     let s = `Сборка кухни · ${o.name}${o.addr ? `\n${o.addr}` : ""}\n`;
     STAGES.forEach((sg) => {
       const p = stageProg(sg);
-      s += `\n${sg.title}: ${p.steps} из ${sg.steps.length} шагов\n` + sg.steps.map((st) => `${stepDone(st) ? "✓" : doneOf(st) ? "…" : "—"} ${st.title}`).join("\n") + "\n";
+      s += `\n${sg.title}: ${p.steps} из ${sg.steps.length} шагов\n` + sg.steps.map((st) => {
+        if (skipped(st)) return `· ${st.title} (не нужно)`;
+        if (stepDone(st)) return `✓ ${st.title}`;
+        const set = new Set(o.done[st.id] || []), left = st.checks.filter((_, k) => !set.has(k));
+        return set.size ? `… ${st.title}\n   осталось: ${left.join("; ")}` : `— ${st.title}`;
+      }).join("\n") + "\n";
     });
     if (o.note) s += `\nЗаметки: ${o.note}`;
     return s;
@@ -288,16 +328,41 @@
     if ((el = T("[data-plan]"))) { buyPrompt(el.dataset.plan); return; }
     if ((el = T("[data-act]"))) {
       const a = el.dataset.act;
+      if (a === "pdf") {
+        if (!S.paid) { toast("Книга в PDF — в полном доступе"); return; }
+        if (!CFG.API_URL || !tg) { toast("PDF присылает бот: откройте приложение из Telegram"); return; }
+        el.disabled = true; toast("Отправляю книгу в чат…");
+        // «server» и «unknown action» значат, что у бота ещё нет доступа к Диску или он не обновлён
+        const nice = (e) => (!e || e === "server" || e === "unknown action" ? "Скачивание PDF ещё настраивается, попробуйте позже" : e);
+        api("sendBook").then((r) => toast(r.ok ? "Книга в чате с ботом" : nice(r.error))).catch(() => toast("Ошибка сети")).finally(() => { el.disabled = false; });
+        return;
+      }
+      if (a === "skip") {
+        const st = stageOf(S.tab).steps[S.step], o = O();
+        o.skip = o.skip || {};
+        if (o.skip[st.id]) delete o.skip[st.id]; else o.skip[st.id] = true;
+        save(); toast(o.skip[st.id] ? "Шаг отмечен как ненужный" : "Шаг вернулся в работу"); render(false); return;
+      }
+      if (a === "kitReset") { O().kit = []; O().kitOpen = true; save(); render(false); return; }
       if (a === "copyReport") { if (navigator.clipboard) navigator.clipboard.writeText(reportText()).then(() => toast("Отчёт скопирован"), () => toast("Не удалось скопировать")); }
       else if (a === "resetObj") ask("Снять все отметки по этому объекту?").then((ok) => { if (ok) { O().done = {}; save(); render(false); } });
       else if (a === "code") { const inp = $("[data-code]"); if (inp && inp.value.trim()) { if (!CFG.API_URL) { toast("Коды заработают, когда подключим бота"); return; } api("redeem", { code: inp.value.trim().toUpperCase() }).then((r) => { if (r.ok) { checkAccess().then(() => render(false)); toast(r.msg || "Код активирован"); } else toast(r.error || "Код не подошёл"); }).catch(() => toast("Ошибка сети")); } }
       return;
     }
     if (T(".project-chip")) { showObjSheet(); return; }
+    if ((el = T("[data-kitbox] > summary"))) { O().kitOpen = !el.parentElement.open; save(); return; }
   });
 
   document.addEventListener("change", (e) => {
     const el = e.target;
+    if (el.dataset.kit !== undefined) {
+      const o = O(), kit = new Set(o.kit || []);
+      el.checked ? kit.add(el.dataset.kit) : kit.delete(el.dataset.kit);
+      o.kit = [...kit];
+      el.closest(".chk").classList.toggle("done", el.checked);
+      const c = $("[data-kitbox] .sub-inline"); if (c) c.textContent = `${o.kit.length} из ${KIT.length}`;
+      save(); haptic(); return;
+    }
     if (el.dataset.ci === undefined) return;
     const sg = stageOf(S.tab), st = sg.steps[S.step], o = O(), set = new Set(o.done[st.id] || []), k = Number(el.dataset.ci);
     el.checked ? set.add(k) : set.delete(k);
@@ -309,6 +374,12 @@
 
   document.addEventListener("input", (e) => {
     const el = e.target;
+    if (el.dataset.search !== undefined) {
+      S.q = el.value;
+      const b = $("#bookBody");
+      if (b) b.innerHTML = S.q.trim().length >= 2 ? searchHtml(S.q) : S.bookBody;
+      return;
+    }
     if (!el.dataset.of) return;
     O()[el.dataset.of] = el.value;
     if (el.dataset.of === "name") $("#projectName").textContent = el.value || "—";
