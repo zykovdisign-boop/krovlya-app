@@ -186,3 +186,14 @@ svg.elev, svg.elev-mini, svg.ctop, svg.sheets { display: block; width: 100%; hei
 .chk.done span { color: var(--hint); text-decoration: line-through; }
 .nr { display: inline-block; font-size: 11px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent); border-radius: 99px; padding: 1px 7px; margin-left: 6px; vertical-align: 1px; }
 .back { border: 0; background: none; color: var(--link); font: inherit; padding: 4px; margin: 0 0 6px; min-height: 40px; }
+
+/* пошаговая сборка */
+.num { width: 30px; height: 30px; flex: none; border-radius: 50%; background: var(--bg2); color: var(--hint); display: flex; align-items: center; justify-content: center; font-size: 13.5px; font-weight: 700; }
+.num.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.step-text { margin: 0; font-size: 15px; line-height: 1.5; }
+.draw-link { display: block; width: 100%; text-align: left; margin-top: 12px; border: 1px solid var(--line); background: var(--bg2); color: var(--link); font: inherit; font-size: 14.5px; padding: 11px 12px; border-radius: 10px; min-height: 44px; }
+.step-nav { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; margin: 4px 0 16px; }
+.step-nav .btn { margin-top: 0; }
+.step-nav .btn:disabled { opacity: .45; }
+textarea { width: 100%; font: inherit; font-size: 16px; color: var(--text); background: var(--bg2); border: 1px solid transparent; border-radius: 10px; padding: 10px; outline: none; resize: vertical; }
+textarea:focus { border-color: var(--btn); }
