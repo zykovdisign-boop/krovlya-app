@@ -153,7 +153,7 @@
           return `<div class="cl-item" data-chapter="${i}"><span class="num${rd ? " ok" : ""}">${rd ? "✓" : i + 1}</span><div class="t">${esc(c.title)}<small>${sub}</small></div><span style="color:var(--hint)">›</span></div>`; }).join("")}</div>`;
     } else if (S.bookView === "parts") {
       body = `<p class="sub" style="margin:0 4px 12px">Чем собирается кухня и как это ставить. Для тех, кто держит конфирмат в руках первый раз</p>
-        <div class="card">${PARTS.map((p) => `<div class="cl-item" data-part="${p.id}"><span class="num">🔩</span><div class="t">${esc(p.name)}<small>${esc(p.aka)}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>`;
+        ${[["mebel", "Мебельный крепёж и фурнитура", "🔩"], ["tech", "Сантехника и техника", "🚰"]].map(([g, title, ic]) => `<h3 style="margin:14px 4px 8px">${title}</h3><div class="card">${PARTS.filter((p) => (p.g || "mebel") === g).map((p) => `<div class="cl-item" data-part="${p.id}"><span class="num">${ic}</span><div class="t">${esc(p.name)}<small>${esc(p.aka)}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>`).join("")}`;
     } else if (S.bookView === "nodes") {
       body = `<p class="sub" style="margin:0 4px 12px">Схемы с размерами и отступами. Нажмите, чтобы открыть</p>
         <div class="card">${draws.map((d) => `<div class="cl-item" data-draw="${d.file}" data-free="${d.free ? 1 : 0}"><div class="t">${d.title}<small>${d.free || S.paid ? d.sub : "🔒 полный доступ"}</small></div><span style="color:var(--hint)">›</span></div>`).join("")}</div>`;

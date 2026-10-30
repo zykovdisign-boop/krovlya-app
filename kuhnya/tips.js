@@ -65,4 +65,7 @@ window.DRAWINGS = [
   { file: "drawings/12_mezhsek.svg", title: "Межсекционная стяжка", sub: "винт с ответной гайкой между шкафами", free: false },
   { file: "drawings/13_hanger.svg", title: "Навес, шина и крюки", sub: "как посчитать высоту шины", free: false },
   { file: "drawings/14_hinge.svg", title: "Петля", sub: "сверловка фасада и три винта регулировки", free: false },
+  { file: "drawings/15_siphon.svg", title: "Сифон мойки", sub: "детали, прокладки, отвод под ПММ", free: false },
+  { file: "drawings/16_dw_connect.svg", title: "Подключение посудомойки", sub: "кран-тройник и петля сливного шланга", free: false },
+  { file: "drawings/17_hob_terminal.svg", title: "Подключение варочной панели", sub: "перемычки под одну фазу 220 В", free: false },
 ];
